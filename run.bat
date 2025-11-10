@@ -29,7 +29,7 @@ echo Opening webcam preview in the browser...
 start "webcam-preview" http://localhost:%PORT%/
 
 echo Starting red scarf monitor in web mode on port %PORT%...
-"%PYTHON%" red_scarf_monitor.py --config config\config.yaml --mode web --host 0.0.0.0 --port %PORT% %*
+"%PYTHON%" app.py --config config\config.yaml --mode web --host 0.0.0.0 --port %PORT% %*
 
 if errorlevel 1 (
     echo.

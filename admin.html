@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Attendance Admin</title>
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+        body {
+            font-family: "Inter", Arial, sans-serif;
+            background: #0b1120;
+            color: #e2e8f0;
+            margin: 0;
+        }
+        main {
+            width: min(1200px, 95vw);
+            margin: 2rem auto 4rem;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        h1 {
+            margin: 0;
+            font-size: clamp(1.8rem, 2.5vw, 2.3rem);
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+        a.button, button {
+            padding: 0.65rem 1.4rem;
+            border-radius: 999px;
+            border: none;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            color: #0f172a;
+            background: linear-gradient(135deg, #38bdf8, #6366f1);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        a.button:hover, button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 14px 28px rgba(99, 102, 241, 0.35);
+        }
+        .card {
+            background: #111c2e;
+            border-radius: 18px;
+            padding: 1.4rem;
+            box-shadow: 0 22px 50px rgba(15, 23, 42, 0.55);
+        }
+        .grid {
+            display: grid;
+            gap: 1.5rem;
+        }
+        .two-column {
+            grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr);
+        }
+        @media (max-width: 980px) {
+            .two-column {
+                grid-template-columns: 1fr;
+            }
+        }
+        form {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+        input[type="text"] {
+            background: rgba(15, 23, 42, 0.55);
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            border-radius: 999px;
+            padding: 0.6rem 1.1rem;
+            color: inherit;
+            font-size: 0.95rem;
+            min-width: 260px;
+        }
+        input[type="text"]::placeholder {
+            color: #64748b;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.95rem;
+        }
+        thead {
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-size: 0.75rem;
+        }
+        th, td {
+            padding: 0.6rem 0.4rem;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+        }
+        tbody tr {
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+        tbody tr:hover {
+            background: rgba(59, 130, 246, 0.12);
+        }
+        tbody tr.active {
+            background: rgba(96, 165, 250, 0.18);
+        }
+        .stats {
+            display: flex;
+            gap: 1.2rem;
+            flex-wrap: wrap;
+        }
+        .stat {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            min-width: 120px;
+        }
+        .stat span:first-child {
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-size: 0.75rem;
+            color: #94a3b8;
+        }
+        .stat span:last-child {
+            font-size: 1.75rem;
+            font-weight: 600;
+        }
+        .samples-grid {
+            display: grid;
+            gap: 0.75rem;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        }
+        .sample-card {
+            position: relative;
+            overflow: hidden;
+            border-radius: 12px;
+            box-shadow: 0 12px 25px rgba(14, 23, 42, 0.55);
+            background: rgba(15, 23, 42, 0.65);
+            display: flex;
+            flex-direction: column;
+        }
+        .sample-card img {
+            width: 100%;
+            aspect-ratio: 3 / 4;
+            object-fit: cover;
+        }
+        .sample-card footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.6rem 0.75rem;
+            background: rgba(15, 23, 42, 0.75);
+            gap: 0.75rem;
+        }
+        .sample-card footer span {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            letter-spacing: 0.03em;
+        }
+        .remove-sample-btn {
+            border: none;
+            border-radius: 999px;
+            padding: 0.35rem 0.8rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: rgba(248, 113, 113, 0.15);
+            color: #fecaca;
+            cursor: pointer;
+            transition: background 0.2s ease, transform 0.2s ease;
+        }
+        .remove-sample-btn:hover {
+            background: rgba(248, 113, 113, 0.35);
+            transform: translateY(-1px);
+        }
+        .empty-state {
+            padding: 1.2rem;
+            border-radius: 12px;
+            background: rgba(148, 163, 184, 0.1);
+            text-align: center;
+            color: #94a3b8;
+        }
+        .capture-preview {
+            margin-top: 1rem;
+            border: 1px solid rgba(96, 165, 250, 0.25);
+            border-radius: 14px;
+            overflow: hidden;
+            background: rgba(15, 23, 42, 0.55);
+        }
+        .capture-preview header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            padding: 0.6rem 0.85rem;
+            font-size: 0.8rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #60a5fa;
+            background: rgba(37, 99, 235, 0.18);
+        }
+        .preview-status {
+            font-size: 0.75rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #94a3b8;
+            white-space: nowrap;
+        }
+        .preview-status[data-state="online"] {
+            color: #34d399;
+        }
+        .preview-status[data-state="connecting"] {
+            color: #facc15;
+        }
+        .preview-status[data-state="error"] {
+            color: #f87171;
+        }
+        .capture-preview-body {
+            position: relative;
+        }
+        .capture-preview img {
+            display: block;
+            width: 100%;
+            max-height: 260px;
+            object-fit: cover;
+        }
+        .capture-preview-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            text-align: center;
+            font-size: 0.85rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: #cbd5f5;
+            background: rgba(15, 23, 42, 0.68);
+        }
+        .attendance-list {
+            display: grid;
+            gap: 0.8rem;
+        }
+        .attendance-item {
+            padding: 0.9rem 1.1rem;
+            border-radius: 14px;
+            background: rgba(96, 165, 250, 0.12);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+        }
+        .attendance-item .meta {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+        .badge {
+            padding: 0.3rem 0.7rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            background: rgba(148, 163, 184, 0.18);
+            color: #e2e8f0;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <header>
+            <div>
+                <h1>Attendance Admin</h1>
+                <p style="color:#94a3b8;">Manage student identities and attendance logs</p>
+            </div>
+            <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+                <a class="button" href="webcam.html">Back to Monitor</a>
+                <a class="button" href="attendance_report.html">Attendance Report</a>
+            </div>
+        </header>
+
+        <section class="card">
+            <form id="addStudentForm">
+                <input type="text" id="studentNameInput" placeholder="Student name" autocomplete="off" required />
+                <button type="submit">Add Student</button>
+            </form>
+        </section>
+
+        <section class="grid two-column">
+            <div class="card" style="overflow:auto;">
+                <div class="stats" id="attendanceStats">
+                    <div class="stat">
+                        <span>Check-ins</span>
+                        <span id="checkInCount">0</span>
+                    </div>
+                    <div class="stat">
+                        <span>Check-outs</span>
+                        <span id="checkOutCount">0</span>
+                    </div>
+                    <div class="stat">
+                        <span>Total Students</span>
+                        <span id="studentTotalCount">0</span>
+                    </div>
+                </div>
+
+                <h2 style="margin:1.2rem 0 0.5rem;">Students</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="text-align:left;">Name</th>
+                            <th>Samples</th>
+                            <th>Last Seen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="studentsTableBody">
+                        <tr><td colspan="3" style="padding:1.2rem; text-align:center; color:#94a3b8;">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem;">
+                    <div>
+                        <h2 id="selectedStudentTitle" style="margin:0 0 0.4rem;">Select a student</h2>
+                        <p id="selectedStudentMeta" style="margin:0; color:#94a3b8; font-size:0.9rem;">Capture samples to improve recognition accuracy.</p>
+                    </div>
+                    <button id="captureSampleButton" disabled>Capture Sample</button>
+                </div>
+                <div style="margin-top:1.2rem;">
+                    <div class="capture-preview" id="capturePreview" style="display:none;">
+                        <header>
+                            <span>Live Capture Preview</span>
+                            <span id="capturePreviewStatus" class="preview-status" data-state="idle">Idle</span>
+                        </header>
+                        <div class="capture-preview-body">
+                            <img id="capturePreviewFeed" src="" alt="Live capture preview">
+                            <div id="capturePreviewOverlay" class="capture-preview-overlay" style="display:none;"></div>
+                        </div>
+                    </div>
+                    <div id="samplesContainer" class="samples-grid"></div>
+                    <div id="samplesEmptyState" class="empty-state" style="display:none;">No samples yet. Capture one to get started.</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+                <h2 style="margin:0;">Attendance Logs</h2>
+                <span class="badge" id="attendanceTotalBadge">0 entries</span>
+            </div>
+            <div id="attendanceList" class="attendance-list" style="margin-top:1.2rem;">
+                <div class="empty-state">Logs will appear here once attendance is recorded.</div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const studentsTableBody = document.getElementById('studentsTableBody');
+        const checkInCountEl = document.getElementById('checkInCount');
+        const checkOutCountEl = document.getElementById('checkOutCount');
+        const studentTotalCountEl = document.getElementById('studentTotalCount');
+        const selectedStudentTitle = document.getElementById('selectedStudentTitle');
+        const selectedStudentMeta = document.getElementById('selectedStudentMeta');
+        const captureSampleButton = document.getElementById('captureSampleButton');
+        const samplesContainer = document.getElementById('samplesContainer');
+        const samplesEmptyState = document.getElementById('samplesEmptyState');
+        const capturePreview = document.getElementById('capturePreview');
+        const capturePreviewFeed = document.getElementById('capturePreviewFeed');
+        const capturePreviewStatus = document.getElementById('capturePreviewStatus');
+        const capturePreviewOverlay = document.getElementById('capturePreviewOverlay');
+        const attendanceList = document.getElementById('attendanceList');
+        const attendanceTotalBadge = document.getElementById('attendanceTotalBadge');
+        const addStudentForm = document.getElementById('addStudentForm');
+        const studentNameInput = document.getElementById('studentNameInput');
+
+        let studentsCache = [];
+        let selectedStudentId = null;
+        let isCapturing = false;
+        let previewActive = false;
+        let previewReconnectTimer = null;
+
+        function stopPreviewReconnectTimer() {
+            if (previewReconnectTimer) {
+                clearTimeout(previewReconnectTimer);
+                previewReconnectTimer = null;
+            }
+        }
+
+        function setPreviewState(state, message) {
+            if (capturePreviewStatus) {
+                capturePreviewStatus.dataset.state = state;
+                switch (state) {
+                    case 'online':
+                        capturePreviewStatus.textContent = 'Online';
+                        break;
+                    case 'connecting':
+                        capturePreviewStatus.textContent = 'Connecting...';
+                        break;
+                    case 'error':
+                        capturePreviewStatus.textContent = 'Offline';
+                        break;
+                    default:
+                        capturePreviewStatus.textContent = 'Idle';
+                        break;
+                }
+            }
+            if (capturePreviewOverlay) {
+                if (message) {
+                    capturePreviewOverlay.textContent = message;
+                    capturePreviewOverlay.style.display = 'flex';
+                } else {
+                    capturePreviewOverlay.style.display = 'none';
+                }
+            }
+        }
+
+        function connectPreviewStream() {
+            if (!capturePreviewFeed) {
+                return;
+            }
+            previewActive = true;
+            stopPreviewReconnectTimer();
+            setPreviewState('connecting', 'Connecting to camera...');
+            capturePreviewFeed.src = `video_feed?raw=1&cache=${Date.now()}`;
+        }
+
+        function schedulePreviewReconnect() {
+            stopPreviewReconnectTimer();
+            previewReconnectTimer = setTimeout(() => {
+                if (!previewActive) {
+                    return;
+                }
+                setPreviewState('connecting', 'Reconnecting to camera...');
+                capturePreviewFeed.src = `video_feed?raw=1&cache=${Date.now()}`;
+            }, 2000);
+        }
+
+        function showPreview(forceReconnect = false) {
+            if (!capturePreview) {
+                return;
+            }
+            capturePreview.style.display = 'block';
+            if (
+                forceReconnect ||
+                !previewActive ||
+                !capturePreviewFeed ||
+                !capturePreviewFeed.src
+            ) {
+                connectPreviewStream();
+            }
+        }
+
+        function hidePreview() {
+            previewActive = false;
+            if (capturePreview) {
+                capturePreview.style.display = 'none';
+            }
+            stopPreviewReconnectTimer();
+            if (capturePreviewFeed) {
+                capturePreviewFeed.src = '';
+            }
+            setPreviewState('idle', '');
+        }
+
+        if (capturePreviewFeed) {
+            capturePreviewFeed.addEventListener('load', () => {
+                if (!previewActive) {
+                    return;
+                }
+                setPreviewState('online', '');
+            });
+            capturePreviewFeed.addEventListener('error', () => {
+                if (!previewActive) {
+                    return;
+                }
+                setPreviewState('error', 'Stream disconnected. Retrying...');
+                schedulePreviewReconnect();
+            });
+        }
+
+        setPreviewState('idle', '');
+
+        async function fetchJSON(url, options) {
+            const response = await fetch(url, options);
+            if (!response.ok) {
+                const message = (await response.json().catch(() => ({}))).message || response.statusText;
+                throw new Error(message);
+            }
+            return response.json();
+        }
+
+        function formatDate(value) {
+            if (!value) return 'Never';
+            try {
+                return new Date(value).toLocaleString();
+            } catch {
+                return value;
+            }
+        }
+
+        function renderStudentsTable() {
+            if (!studentsCache.length) {
+                studentsTableBody.innerHTML = '<tr><td colspan="3" style="padding:1.2rem; text-align:center; color:#94a3b8;">No students yet.</td></tr>';
+                return;
+            }
+
+            studentsTableBody.innerHTML = '';
+            studentsCache.forEach((student) => {
+                const row = document.createElement('tr');
+                row.dataset.id = String(student.id);
+                row.innerHTML = `
+                    <td style="text-align:left;">${student.name}</td>
+                    <td style="text-align:center;">${student.sample_count}</td>
+                    <td style="text-align:center; color:#94a3b8;">${formatDate(student.last_seen_at)}</td>
+                `;
+                if (student.id === selectedStudentId) {
+                    row.classList.add('active');
+                }
+                row.addEventListener('click', () => selectStudent(student.id));
+                studentsTableBody.appendChild(row);
+            });
+        }
+
+        async function loadStudents() {
+            try {
+                const data = await fetchJSON('api/students');
+                if (!data.enabled) {
+                    studentsTableBody.innerHTML = '<tr><td colspan="3" style="padding:1.3rem; text-align:center; color:#f87171;">Attendance module is disabled in configuration.</td></tr>';
+                    return;
+                }
+                studentsCache = data.students || [];
+                checkInCountEl.textContent = data.attendance?.check_ins ?? 0;
+                checkOutCountEl.textContent = data.attendance?.check_outs ?? 0;
+                studentTotalCountEl.textContent = studentsCache.length;
+                renderStudentsTable();
+                if (selectedStudentId) {
+                    const exists = studentsCache.some((s) => s.id === selectedStudentId);
+                    if (!exists) {
+                        clearSelection();
+                    }
+                }
+            } catch (error) {
+                studentsTableBody.innerHTML = `<tr><td colspan="3" style="padding:1.2rem; text-align:center; color:#f87171;">Failed to load students: ${error.message}</td></tr>`;
+            }
+        }
+
+        async function selectStudent(studentId) {
+            selectedStudentId = studentId;
+            studentsTableBody.querySelectorAll('tr').forEach((row) => {
+                row.classList.toggle('active', Number(row.dataset.id) === studentId);
+            });
+
+            const student = studentsCache.find((s) => s.id === studentId);
+            if (!student) {
+                clearSelection();
+                return;
+            }
+
+            selectedStudentTitle.textContent = student.name;
+            selectedStudentMeta.textContent = `Last seen: ${formatDate(student.last_seen_at)} — Samples: ${student.sample_count}`;
+            captureSampleButton.disabled = false;
+            showPreview();
+
+            try {
+                const data = await fetchJSON(`api/students/${studentId}/samples`);
+                renderSamples(data.samples || []);
+            } catch (error) {
+                samplesContainer.innerHTML = '';
+                samplesEmptyState.style.display = 'block';
+                samplesEmptyState.textContent = `Unable to load samples: ${error.message}`;
+            }
+        }
+
+        function clearSelection() {
+            selectedStudentId = null;
+            captureSampleButton.disabled = true;
+            selectedStudentTitle.textContent = 'Select a student';
+            selectedStudentMeta.textContent = 'Capture samples to improve recognition accuracy.';
+            hidePreview();
+            samplesContainer.innerHTML = '';
+            samplesEmptyState.style.display = 'block';
+            samplesEmptyState.textContent = 'No samples yet. Capture one to get started.';
+        }
+
+        function renderSamples(samples) {
+            samplesContainer.innerHTML = '';
+            if (!samples.length) {
+                samplesEmptyState.style.display = 'block';
+                samplesEmptyState.textContent = 'No samples yet. Capture one to get started.';
+                return;
+            }
+            samplesEmptyState.style.display = 'none';
+            samples.forEach((sample) => {
+                const card = document.createElement('div');
+                card.className = 'sample-card';
+
+                const img = document.createElement('img');
+                img.src = sample.image_url;
+                img.alt = `Sample captured ${formatDate(sample.created_at)}`;
+                card.appendChild(img);
+
+                const footer = document.createElement('footer');
+                const info = document.createElement('span');
+                info.textContent = formatDate(sample.created_at);
+                footer.appendChild(info);
+
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'remove-sample-btn';
+                removeBtn.type = 'button';
+                removeBtn.textContent = 'Remove';
+                removeBtn.addEventListener('click', () => removeSample(sample.id));
+                footer.appendChild(removeBtn);
+
+                card.appendChild(footer);
+                samplesContainer.appendChild(card);
+            });
+        }
+
+        async function captureSample() {
+            if (!selectedStudentId || isCapturing) {
+                return;
+            }
+            isCapturing = true;
+            captureSampleButton.textContent = 'Capturing...';
+            captureSampleButton.disabled = true;
+            try {
+                const data = await fetchJSON(`api/students/${selectedStudentId}/capture`, { method: 'POST' });
+                await loadStudents();
+                await selectStudent(selectedStudentId);
+                alert('Sample captured successfully.');
+            } catch (error) {
+                alert(`Capture failed: ${error.message}`);
+            } finally {
+                isCapturing = false;
+                captureSampleButton.textContent = 'Capture Sample';
+                captureSampleButton.disabled = !selectedStudentId;
+            }
+        }
+
+        async function removeSample(sampleId) {
+            if (!selectedStudentId) return;
+            const confirmDelete = window.confirm('Remove this sample image? This action cannot be undone.');
+            if (!confirmDelete) return;
+            try {
+                await fetchJSON(`api/students/${selectedStudentId}/samples/${sampleId}`, { method: 'DELETE' });
+                await loadStudents();
+                if (selectedStudentId) {
+                    await selectStudent(selectedStudentId);
+                }
+            } catch (error) {
+                alert(`Unable to remove sample: ${error.message}`);
+            }
+        }
+
+        async function loadAttendance() {
+            try {
+                const data = await fetchJSON('api/attendance/logs?limit=100');
+                if (!data.enabled) {
+                    attendanceList.innerHTML = '<div class="empty-state">Attendance tracking is disabled.</div>';
+                    attendanceTotalBadge.textContent = '0 entries';
+                    return;
+                }
+                const records = data.records || [];
+                attendanceTotalBadge.textContent = `${records.length} entries`;
+                if (!records.length) {
+                    attendanceList.innerHTML = '<div class="empty-state">Logs will appear here once attendance is recorded.</div>';
+                    return;
+                }
+                attendanceList.innerHTML = '';
+                records.forEach((record) => {
+                    const item = document.createElement('div');
+                    item.className = 'attendance-item';
+                    item.innerHTML = `
+                        <div class="meta">
+                            <strong>${record.student_name}</strong>
+                            <span style="color:#94a3b8;">${new Date(record.timestamp).toLocaleString()}</span>
+                        </div>
+                        <span class="badge">${record.event_type.replace('_', ' ')}</span>
+                    `;
+                    attendanceList.appendChild(item);
+                });
+            } catch (error) {
+                attendanceList.innerHTML = `<div class="empty-state">Unable to load attendance logs: ${error.message}</div>`;
+            }
+        }
+
+        addStudentForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const name = studentNameInput.value.trim();
+            if (!name) return;
+            try {
+                await fetchJSON('api/students', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name }),
+                });
+                studentNameInput.value = '';
+                await loadStudents();
+            } catch (error) {
+                alert(`Unable to add student: ${error.message}`);
+            }
+        });
+
+        captureSampleButton.addEventListener('click', captureSample);
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadStudents();
+            await loadAttendance();
+            setInterval(() => {
+                loadStudents();
+                loadAttendance();
+            }, 8000);
+        });
+    </script>
+</body>
+</html>
+
+

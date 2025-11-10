@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Attendance Report</title>
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+        body {
+            font-family: "Inter", Arial, sans-serif;
+            background: #0b1120;
+            color: #e2e8f0;
+            margin: 0;
+        }
+        main {
+            width: min(1100px, 95vw);
+            margin: 2rem auto 4rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.8rem;
+        }
+        header {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+        h1 {
+            margin: 0;
+            font-size: clamp(1.9rem, 2.5vw, 2.4rem);
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+        .subtitle {
+            color: #94a3b8;
+            font-size: 0.95rem;
+            margin-top: 0.35rem;
+        }
+        .header-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+        button, a.button {
+            padding: 0.6rem 1.4rem;
+            border-radius: 999px;
+            border: none;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            color: #0f172a;
+            background: linear-gradient(135deg, #38bdf8, #6366f1);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        button:hover, a.button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 14px 28px rgba(99, 102, 241, 0.35);
+        }
+        button:disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+            transform: none;
+            box-shadow: none;
+        }
+        .card {
+            background: #111c2e;
+            border-radius: 18px;
+            padding: 1.4rem;
+            box-shadow: 0 22px 50px rgba(15, 23, 42, 0.55);
+        }
+        .filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: flex-end;
+        }
+        .filters label {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #94a3b8;
+        }
+        select {
+            appearance: none;
+            background: rgba(15, 23, 42, 0.55);
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            border-radius: 12px;
+            color: inherit;
+            font-size: 0.95rem;
+            padding: 0.6rem 0.9rem;
+            min-width: 120px;
+        }
+        select:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1.2rem;
+        }
+        thead {
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-size: 0.75rem;
+        }
+        th, td {
+            padding: 0.75rem 0.5rem;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+        }
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+        tbody tr:hover {
+            background: rgba(59, 130, 246, 0.12);
+        }
+        .empty-row {
+            text-align: center;
+            color: #94a3b8;
+            padding: 1.2rem 0;
+        }
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            color: #94a3b8;
+        }
+        .status-highlight {
+            color: #cbd5f5;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <header>
+            <div>
+                <h1>Attendance Report</h1>
+                <p class="subtitle">Review daily check-in and check-out activity per student.</p>
+            </div>
+            <div class="header-actions">
+                <a class="button" href="admin.html">Back to Admin</a>
+                <a class="button" href="webcam.html">Back to Monitor</a>
+                <button id="exportButton" type="button">Export Report</button>
+            </div>
+        </header>
+
+        <section class="card">
+            <form class="filters" id="filtersForm" onsubmit="return false;">
+                <label>
+                    Year
+                    <select id="yearFilter">
+                        <option value="all">All</option>
+                    </select>
+                </label>
+                <label>
+                    Month
+                    <select id="monthFilter" disabled>
+                        <option value="all">All</option>
+                    </select>
+                </label>
+                <label>
+                    Day
+                    <select id="dayFilter" disabled>
+                        <option value="all">All</option>
+                    </select>
+                </label>
+                <button id="refreshButton" type="button">Refresh</button>
+            </form>
+
+            <div class="status-bar">
+                <span id="reportStatus">Showing latest attendance records.</span>
+                <span id="recordCount" class="status-highlight"></span>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width:70px;">No.</th>
+                        <th>Student</th>
+                        <th style="width:210px;">First Check In</th>
+                        <th style="width:210px;">Last Check Out</th>
+                    </tr>
+                </thead>
+                <tbody id="reportTableBody">
+                    <tr>
+                        <td colspan="4" class="empty-row">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <script>
+        const yearFilter = document.getElementById('yearFilter');
+        const monthFilter = document.getElementById('monthFilter');
+        const dayFilter = document.getElementById('dayFilter');
+        const refreshButton = document.getElementById('refreshButton');
+        const exportButton = document.getElementById('exportButton');
+        const reportTableBody = document.getElementById('reportTableBody');
+        const reportStatus = document.getElementById('reportStatus');
+        const recordCount = document.getElementById('recordCount');
+
+        function buildParams() {
+            const params = new URLSearchParams();
+            if (yearFilter.value !== 'all') params.set('year', yearFilter.value);
+            if (monthFilter.value !== 'all') params.set('month', monthFilter.value);
+            if (dayFilter.value !== 'all') params.set('day', dayFilter.value);
+            return params;
+        }
+
+        function populateSelect(selectEl, values, retainValue = true) {
+            const previous = retainValue ? selectEl.value : 'all';
+            selectEl.innerHTML = '<option value="all">All</option>';
+            values.forEach((value) => {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                selectEl.append(option);
+            });
+            if (retainValue && values.includes(previous)) {
+                selectEl.value = previous;
+            } else {
+                selectEl.value = 'all';
+            }
+            selectEl.disabled = values.length === 0;
+        }
+
+        function formatDateTime(value) {
+            if (!value) return '--';
+            try {
+                return new Date(value).toLocaleString(undefined, {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                });
+            } catch (err) {
+                return value;
+            }
+        }
+
+        function renderRecords(records) {
+            recordCount.textContent = `${records.length} students`;
+            if (!records.length) {
+                reportTableBody.innerHTML = '<tr><td colspan="4" class="empty-row">No attendance recorded for the selected filters.</td></tr>';
+                return;
+            }
+            reportTableBody.innerHTML = '';
+            records.forEach((record, index) => {
+                const row = document.createElement('tr');
+                const firstCheckIn = formatDateTime(record.first_check_in);
+                const lastCheckOut = formatDateTime(record.last_check_out);
+
+                row.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${record.student_name}</td>
+                    <td>${firstCheckIn}</td>
+                    <td>${lastCheckOut}</td>
+                `;
+                reportTableBody.append(row);
+            });
+        }
+
+        async function loadReport(retainSelections = true) {
+            reportTableBody.innerHTML = '<tr><td colspan="4" class="empty-row">Loading...</td></tr>';
+            recordCount.textContent = '';
+            try {
+                const params = buildParams();
+                const query = params.toString();
+                const response = await fetch(query ? `api/attendance/report?${query}` : 'api/attendance/report', { cache: 'no-store' });
+                if (!response.ok) {
+                    throw new Error('Request failed');
+                }
+                const data = await response.json();
+                if (!data.enabled) {
+                    reportTableBody.innerHTML = '<tr><td colspan="4" class="empty-row">Attendance tracking is currently disabled.</td></tr>';
+                    recordCount.textContent = '';
+                    return;
+                }
+
+                const filters = data.filters || { years: [], months: [], days: [] };
+                populateSelect(yearFilter, filters.years, retainSelections);
+                populateSelect(monthFilter, filters.months, retainSelections);
+                populateSelect(dayFilter, filters.days, retainSelections);
+
+                if (data.selected) {
+                    if (data.selected.year && filters.years.includes(data.selected.year)) yearFilter.value = data.selected.year;
+                    if (data.selected.month && filters.months.includes(data.selected.month)) monthFilter.value = data.selected.month;
+                    if (data.selected.day && filters.days.includes(data.selected.day)) dayFilter.value = data.selected.day;
+                }
+
+                renderRecords(data.records || []);
+                updateStatus();
+            } catch (error) {
+                reportTableBody.innerHTML = `<tr><td colspan="4" class="empty-row">Unable to load report: ${error.message}</td></tr>`;
+                recordCount.textContent = '';
+            }
+        }
+
+        function updateStatus() {
+            const parts = [];
+            if (yearFilter.value !== 'all') parts.push(yearFilter.value);
+            if (monthFilter.value !== 'all') parts.push(monthFilter.value);
+            if (dayFilter.value !== 'all') parts.push(dayFilter.value);
+            reportStatus.textContent = parts.length
+                ? `Filters applied: ${parts.join('-')}`
+                : 'Showing latest attendance records.';
+        }
+
+        function handleFilterChange() {
+            loadReport(true);
+        }
+
+        function handleExport() {
+            const params = buildParams();
+            params.set('format', 'csv');
+            const query = params.toString();
+            const url = `api/attendance/report?${query}`;
+            window.open(url, '_blank');
+        }
+
+        yearFilter.addEventListener('change', handleFilterChange);
+        monthFilter.addEventListener('change', handleFilterChange);
+        dayFilter.addEventListener('change', handleFilterChange);
+        refreshButton.addEventListener('click', () => loadReport(true));
+        exportButton.addEventListener('click', handleExport);
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadReport(true);
+        });
+    </script>
+</body>
+</html>
+

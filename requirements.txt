@@ -1,5 +1,5 @@
 ultralytics>=8.2.0
-opencv-python>=4.9.0.80
+opencv-contrib-python>=4.9.0.80
 numpy>=1.26.0
 torch>=2.1.0
 mediapipe>=0.10.8

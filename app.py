@@ -8,8 +8,8 @@ browser viewing.
 
 Run with:
 
-    python red_scarf_monitor.py                 # OpenCV window
-    python red_scarf_monitor.py --mode web      # MJPEG web stream
+    python app.py                 # OpenCV window
+    python app.py --mode web      # MJPEG web stream
 
 Press 'q' to quit, 'e' to export violations to CSV on demand (GUI mode).
 """
@@ -17,7 +17,9 @@ Press 'q' to quit, 'e' to export violations to CSV on demand (GUI mode).
 from __future__ import annotations
 
 import argparse
+import csv
 import datetime as dt
+import io
 import sqlite3
 import threading
 import time
@@ -33,6 +35,10 @@ import yaml
 
 from flask import Flask, Response, abort, jsonify, redirect, request, send_from_directory
 
+from attendance import AttendanceRecord, AttendanceStore, RecognitionResult, Student, StudentRecognizer
+
+_HAAR_FACE_CASCADE = None
+
 try:
     import mediapipe as mp  # type: ignore
 
@@ -40,8 +46,24 @@ try:
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5,
     )
+    MP_FACE = mp.solutions.face_detection.FaceDetection(
+        model_selection=0,
+        min_detection_confidence=0.6,
+    )
 except Exception:  # pragma: no cover - optional dependency
     MP_POSE = None
+    MP_FACE = None
+
+try:
+    cascade_root = getattr(cv2.data, "haarcascades", "")
+    if cascade_root:
+        cascade_path = Path(cascade_root) / "haarcascade_frontalface_default.xml"
+        if cascade_path.exists():
+            candidate = cv2.CascadeClassifier(str(cascade_path))
+            if not candidate.empty():
+                _HAAR_FACE_CASCADE = candidate
+except Exception:  # pragma: no cover - optional dependency
+    _HAAR_FACE_CASCADE = None
 
 try:
     from playsound import playsound  # type: ignore
@@ -57,6 +79,7 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 _LATEST_FRAME: Optional[np.ndarray] = None
+_LATEST_RAW_FRAME: Optional[np.ndarray] = None
 _FRAME_LOCK = threading.Lock()
 _STATS_LOCK = threading.Lock()
 _LATEST_STATS: Dict[str, Any] = {
@@ -66,11 +89,19 @@ _LATEST_STATS: Dict[str, Any] = {
     "missing": 0,
     "fps": 0.0,
     "monitoring": False,
+    "recognized": 0,
+    "capture_active": True,
     "message": "Initializing",
 }
 _GLOBAL_SETTINGS: Optional["Settings"] = None
 _VIOLATION_STORE: Optional["ViolationStore"] = None
+_ATTENDANCE_STORE: Optional[AttendanceStore] = None
+_STUDENT_RECOGNIZER: Optional[StudentRecognizer] = None
+_ATTENDANCE_MANAGER: Optional["AttendanceManager"] = None
 _CONFIG_PATH: Optional[Path] = None
+_FACE_LOCK = threading.Lock()
+_CAPTURE_LOCK = threading.Lock()
+_CAPTURE_ACTIVE = True
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +129,12 @@ class Settings:
     csv_path: Path
     alarm_file: Optional[Path]
     time_window_enabled: bool
+    attendance_enabled: bool
+    student_samples_dir: Path
+    attendance_confidence_threshold: float
+    attendance_cooldown_seconds: float
+    recognition_min_samples: int
+    face_distance_threshold: float
 
 
 _CONFIG_FIELD_TYPES: Dict[str, type] = {
@@ -119,6 +156,12 @@ _CONFIG_FIELD_TYPES: Dict[str, type] = {
     "snapshot_dir": str,
     "db_path": str,
     "log_csv_path": str,
+    "attendance_enabled": bool,
+    "attendance_confidence_threshold": float,
+    "attendance_cooldown_seconds": float,
+    "student_samples_dir": str,
+    "recognition_min_samples": int,
+    "face_distance_threshold": float,
 }
 
 
@@ -162,6 +205,12 @@ def load_settings(config_path: Path) -> Settings:
         csv_path=resolve_path(data.get("log_csv_path"), "logs/violations.csv"),
         alarm_file=alarm_path,
         time_window_enabled=bool(data.get("time_window_enabled", True)),
+        attendance_enabled=bool(data.get("attendance_enabled", True)),
+        student_samples_dir=resolve_path(data.get("student_samples_dir"), "images/students"),
+        attendance_confidence_threshold=float(data.get("attendance_confidence_threshold", 0.45)),
+        attendance_cooldown_seconds=float(data.get("attendance_cooldown_seconds", 45)),
+        recognition_min_samples=int(data.get("recognition_min_samples", 1)),
+        face_distance_threshold=float(data.get("face_distance_threshold", 70.0)),
     )
 
 
@@ -321,6 +370,28 @@ class CooldownTracker:
 
     def mark(self, track_id: int) -> None:
         self._last_alert[track_id] = time.time()
+
+
+class AttendanceManager:
+    def __init__(self, store: AttendanceStore, cooldown_seconds: float, confidence_threshold: float) -> None:
+        self._store = store
+        self._cooldown = cooldown_seconds
+        self._confidence_threshold = confidence_threshold
+        self._lock = threading.Lock()
+        self._last_logged: Dict[int, float] = {}
+
+    def mark_attendance(self, recognition: RecognitionResult) -> Optional[AttendanceRecord]:
+        if recognition.confidence < self._confidence_threshold:
+            return None
+
+        now = time.time()
+        with self._lock:
+            last = self._last_logged.get(recognition.student_id, 0.0)
+            if now - last < self._cooldown:
+                return None
+            record = self._store.record_attendance(recognition.student_id, confidence=recognition.confidence)
+            self._last_logged[recognition.student_id] = now
+        return record
 
 
 # ---------------------------------------------------------------------------
@@ -577,6 +648,85 @@ def neck_box_from_pose(frame: np.ndarray) -> Optional[Tuple[int, int, int, int]]
     if not results.pose_landmarks:
         return None
 
+
+def detect_faces(frame: np.ndarray) -> List[Tuple[int, int, int, int, float]]:
+    faces: List[Tuple[int, int, int, int, float]] = []
+
+    if MP_FACE is not None:
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        with _FACE_LOCK:
+            results = MP_FACE.process(rgb)
+        if results and results.detections:
+            h, w = frame.shape[:2]
+            for detection in results.detections:
+                location = detection.location_data
+                if not location or not location.HasField("relative_bounding_box"):
+                    continue
+                bbox = location.relative_bounding_box
+                xmin = max(0.0, bbox.xmin)
+                ymin = max(0.0, bbox.ymin)
+                width = min(1.0 - xmin, bbox.width)
+                height = min(1.0 - ymin, bbox.height)
+                if width <= 0 or height <= 0:
+                    continue
+                x1 = int(xmin * w)
+                y1 = int(ymin * h)
+                x2 = int((xmin + width) * w)
+                y2 = int((ymin + height) * h)
+                confidence = float(detection.score[0]) if detection.score else 0.0
+                faces.append((x1, y1, x2, y2, confidence))
+            if faces:
+                return faces
+
+    if _HAAR_FACE_CASCADE is not None:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        try:
+            detections = _HAAR_FACE_CASCADE.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
+        except cv2.error:
+            detections = ()
+        for (x, y, w, h) in detections:
+            faces.append((int(x), int(y), int(x + w), int(y + h), 0.85))
+
+    return faces
+
+
+def crop_face(frame: np.ndarray, bbox: Tuple[int, int, int, int], padding: float = 0.15) -> Optional[np.ndarray]:
+    x1, y1, x2, y2 = bbox
+    h, w = frame.shape[:2]
+    bw = x2 - x1
+    bh = y2 - y1
+    pad_x = int(bw * padding)
+    pad_y = int(bh * padding)
+    nx1 = max(x1 - pad_x, 0)
+    ny1 = max(y1 - pad_y, 0)
+    nx2 = min(x2 + pad_x, w)
+    ny2 = min(y2 + pad_y, h)
+    if nx1 >= nx2 or ny1 >= ny2:
+        return None
+    return frame[ny1:ny2, nx1:nx2]
+
+
+def face_for_person(frame: np.ndarray, person_bbox: Tuple[int, int, int, int]) -> Optional[np.ndarray]:
+    faces = detect_faces(frame)
+    if not faces:
+        return None
+    x1, y1, x2, y2 = person_bbox
+    best_face: Optional[Tuple[int, int, int, int, float]] = None
+    best_score = -1.0
+    for fx1, fy1, fx2, fy2, score in faces:
+        cx = (fx1 + fx2) // 2
+        cy = (fy1 + fy2) // 2
+        if not (x1 <= cx <= x2 and y1 <= cy <= y2):
+            continue
+        if score > best_score:
+            best_face = (fx1, fy1, fx2, fy2, score)
+            best_score = score
+    if best_face is None:
+        # fall back to highest confidence face overall
+        best_face = max(faces, key=lambda item: item[4])
+    cropped = crop_face(frame, best_face[:4])
+    return cropped
+
     landmarks = results.pose_landmarks.landmark
     h, w = frame.shape[:2]
     try:
@@ -672,10 +822,32 @@ def run_monitor(
     cooldown = CooldownTracker(settings.cooldown_seconds)
     alerts = AlertManager(settings)
     store = ViolationStore(settings)
+    attendance_store: Optional[AttendanceStore] = None
+    recognizer: Optional[StudentRecognizer] = None
+    attendance_manager: Optional[AttendanceManager] = None
 
-    global _GLOBAL_SETTINGS, _VIOLATION_STORE
+    if settings.attendance_enabled:
+        attendance_store = AttendanceStore(settings.db_path, settings.student_samples_dir)
+        recognizer = StudentRecognizer(
+            attendance_store,
+            face_size=(200, 200),
+            distance_threshold=settings.face_distance_threshold,
+            min_samples=settings.recognition_min_samples,
+        )
+        recognizer.rebuild()
+        attendance_manager = AttendanceManager(
+            attendance_store,
+            cooldown_seconds=settings.attendance_cooldown_seconds,
+            confidence_threshold=settings.attendance_confidence_threshold,
+        )
+
+    global _GLOBAL_SETTINGS, _VIOLATION_STORE, _ATTENDANCE_STORE, _STUDENT_RECOGNIZER, _ATTENDANCE_MANAGER
     _GLOBAL_SETTINGS = settings
     _VIOLATION_STORE = store
+    _ATTENDANCE_STORE = attendance_store
+    _STUDENT_RECOGNIZER = recognizer
+    _ATTENDANCE_MANAGER = attendance_manager
+    _set_capture_active(settings.save_violation_images)
 
     cap = cv2.VideoCapture(settings.camera_index)
     if not cap.isOpened():
@@ -688,10 +860,20 @@ def run_monitor(
         print("Streaming frames to web clients. Press Ctrl+C to stop.")
 
     last_violation_text = ""
+    last_attendance_text = ""
     fps = 0.0
     last_time = time.time()
 
-    _set_latest_stats(total=0, with_scarf=0, missing=0, fps=0.0, monitoring=False, message="Starting camera...")
+    _set_latest_stats(
+        total=0,
+        with_scarf=0,
+        missing=0,
+        recognized=0,
+        fps=0.0,
+        capture_active=_get_capture_active(),
+        monitoring=False,
+        message="Starting camera...",
+    )
 
     while True:
         if stop_event and stop_event.is_set():
@@ -705,20 +887,25 @@ def run_monitor(
             cap = cv2.VideoCapture(settings.camera_index)
             continue
 
+        raw_frame = frame.copy()
+        _update_latest_raw_frame(raw_frame)
+
         if not within_time_window(settings):
             cv2.putText(frame, "Outside monitoring window", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             _set_latest_stats(
                 total=0,
                 with_scarf=0,
                 missing=0,
+                recognized=0,
                 fps=0.0,
+                capture_active=_get_capture_active(),
                 monitoring=False,
                 message="Outside monitoring window",
             )
             if frame_callback:
                 frame_callback(frame)
             if display:
-                cv2.imshow("Red Scarf Monitor", frame)
+                cv2.imshow("Student Monitor", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
             else:
@@ -746,6 +933,9 @@ def run_monitor(
 
         scarf_count = 0
         violations = 0
+        recognized_count = 0
+
+        capture_active = _get_capture_active()
 
         for idx, bbox in enumerate(person_boxes):
             x1, y1, x2, y2 = bbox
@@ -785,13 +975,39 @@ def run_monitor(
                 scarf_count += 1
             else:
                 violations += 1
-                if track_id >= 0 and cooldown.ready(track_id):
+                if settings.save_violation_images and capture_active and track_id >= 0 and cooldown.ready(track_id):
                     cooldown.mark(track_id)
-                    snapshot_path = save_snapshot(settings, frame, track_id) if settings.save_violation_images else None
+                    snapshot_path = save_snapshot(settings, frame, track_id)
                     store.log(track_id, confidence, snapshot_path)
                     alerts.sound()
                     alerts.voice("Warning, student without red scarf")
                     last_violation_text = f"Violation ID {track_id} @ {dt.datetime.now().strftime('%H:%M:%S')}"
+
+            if attendance_store and recognizer and recognizer.is_ready:
+                face_crop = face_for_person(frame, bbox)
+                if face_crop is not None:
+                    recognition = recognizer.predict(face_crop)
+                    if recognition is not None:
+                        student = attendance_store.get_student(recognition.student_id)
+                        if student is not None:
+                            recognized_count += 1
+                            label_text = f"{student.name} {recognition.confidence * 100:.0f}%"
+                            cv2.putText(
+                                frame,
+                                label_text,
+                                (x1, y2 + 20),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.6,
+                                (173, 216, 230),
+                                2,
+                            )
+                            if attendance_manager:
+                                record = attendance_manager.mark_attendance(recognition)
+                                if record:
+                                    event_label = record.event_type.replace("_", " ").title()
+                                    last_attendance_text = (
+                                        f"{student.name} {event_label} @ {dt.datetime.now().strftime('%H:%M:%S')}"
+                                    )
 
         now = time.time()
         elapsed = now - last_time
@@ -799,25 +1015,32 @@ def run_monitor(
             fps = 0.9 * fps + 0.1 * (1.0 / elapsed) if fps > 0 else 1.0 / elapsed
         last_time = now
 
-        hud = f"Total: {len(person_boxes)}  With Scarf: {scarf_count}  Missing: {violations}  FPS: {fps:.1f}"
+        hud = (
+            f"Total: {len(person_boxes)}  With Scarf: {scarf_count}  Missing: {violations}  "
+            f"Recognized: {recognized_count}  FPS: {fps:.1f}"
+        )
         cv2.putText(frame, hud, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (240, 240, 240), 2)
         if last_violation_text:
             cv2.putText(frame, last_violation_text, (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 200, 255), 2)
+        if last_attendance_text:
+            cv2.putText(frame, last_attendance_text, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (152, 251, 152), 2)
 
         _set_latest_stats(
             total=len(person_boxes),
             with_scarf=scarf_count,
             missing=violations,
+            recognized=recognized_count,
             fps=fps,
+            capture_active=capture_active,
             monitoring=True,
-            message=last_violation_text or "Monitoring...",
+            message=last_attendance_text or last_violation_text or "Monitoring...",
         )
 
         if frame_callback:
             frame_callback(frame)
 
         if display:
-            cv2.imshow("Red Scarf Monitor", frame)
+            cv2.imshow("Student Monitor", frame)
 
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
@@ -842,12 +1065,20 @@ def _update_latest_frame(frame: np.ndarray) -> None:
         _LATEST_FRAME = frame.copy()
 
 
+def _update_latest_raw_frame(frame: np.ndarray) -> None:
+    global _LATEST_RAW_FRAME
+    with _FRAME_LOCK:
+        _LATEST_RAW_FRAME = frame.copy()
+
+
 def _set_latest_stats(
     *,
     total: int,
     with_scarf: int,
     missing: int,
+    recognized: int,
     fps: float,
+    capture_active: bool,
     monitoring: bool,
     message: str,
 ) -> None:
@@ -858,18 +1089,41 @@ def _set_latest_stats(
                 "total": int(total),
                 "with_scarf": int(with_scarf),
                 "missing": int(missing),
+                "recognized": int(recognized),
                 "fps": round(float(fps), 2),
+                "capture_active": bool(capture_active),
                 "monitoring": monitoring,
                 "message": message,
             }
         )
 
 
-def _generate_mjpeg_frames() -> Iterable[bytes]:
+def _set_capture_active(enabled: bool) -> bool:
+    global _CAPTURE_ACTIVE
+    with _CAPTURE_LOCK:
+        _CAPTURE_ACTIVE = bool(enabled)
+        return _CAPTURE_ACTIVE
+
+
+def _get_capture_active() -> bool:
+    with _CAPTURE_LOCK:
+        return _CAPTURE_ACTIVE
+
+
+def _generate_mjpeg_frames(*, raw: bool = False) -> Iterable[bytes]:
     jpeg_params = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
     while True:
         with _FRAME_LOCK:
-            frame = None if _LATEST_FRAME is None else _LATEST_FRAME.copy()
+            if raw:
+                frame = (
+                    None
+                    if _LATEST_RAW_FRAME is None
+                    else _LATEST_RAW_FRAME.copy()
+                )
+                if frame is None and _LATEST_FRAME is not None:
+                    frame = _LATEST_FRAME.copy()
+            else:
+                frame = None if _LATEST_FRAME is None else _LATEST_FRAME.copy()
         if frame is None:
             time.sleep(0.05)
             continue
@@ -911,15 +1165,25 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
     def settings_page() -> Response:
         return send_from_directory(app.static_folder, "settings.html")
 
+    @app.route("/admin.html")
+    def admin_page() -> Response:
+        return send_from_directory(app.static_folder, "admin.html")
+
     @app.route("/video_feed")
     def video_feed() -> Response:
-        return Response(_generate_mjpeg_frames(), mimetype="multipart/x-mixed-replace; boundary=frame")
+        raw_param = (request.args.get("raw") or "").strip().lower()
+        raw = raw_param in {"1", "true", "yes", "on", "raw"}
+        return Response(
+            _generate_mjpeg_frames(raw=raw),
+            mimetype="multipart/x-mixed-replace; boundary=frame",
+        )
 
     @app.route("/api/status")
     def api_status() -> Response:
         with _STATS_LOCK:
             payload = dict(_LATEST_STATS)
         payload.setdefault("timestamp", dt.datetime.now(dt.timezone.utc).isoformat())
+        payload["capture_active"] = _get_capture_active()
         return jsonify(payload)
 
     @app.route("/api/violations")
@@ -1018,6 +1282,292 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
             }
         )
 
+    @app.route("/api/capture", methods=["POST"])
+    def api_capture_toggle() -> Response:
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            abort(400, description="Expected JSON object")
+        if "enabled" not in payload:
+            abort(400, description="Field 'enabled' is required")
+        enabled = payload["enabled"]
+        if not isinstance(enabled, bool):
+            abort(400, description="'enabled' must be a boolean")
+
+        settings = _GLOBAL_SETTINGS
+        if settings is not None and not settings.save_violation_images and enabled:
+            actual = _set_capture_active(False)
+            return jsonify({"enabled": actual, "allowed": False, "reason": "Snapshot saving disabled in configuration."}), 409
+
+        actual = _set_capture_active(enabled)
+        return jsonify({"enabled": actual, "allowed": True})
+
+    @app.route("/api/students", methods=["GET", "POST"])
+    def api_students() -> Response:
+        if _ATTENDANCE_STORE is None:
+            if request.method == "GET":
+                return jsonify({"enabled": False, "students": [], "attendance": {"check_ins": 0, "check_outs": 0}})
+            abort(503, description="Attendance module is disabled")
+
+        store = _ATTENDANCE_STORE
+
+        if request.method == "GET":
+            students = [
+                {
+                    "id": student.id,
+                    "name": student.name,
+                    "created_at": student.created_at.isoformat(),
+                    "last_seen_at": student.last_seen_at.isoformat() if student.last_seen_at else None,
+                    "sample_count": student.sample_count,
+                }
+                for student in store.list_students()
+            ]
+            summary = store.attendance_summary()
+            return jsonify({"enabled": True, "students": students, "attendance": summary})
+
+        payload = request.get_json(silent=True) or {}
+        name = str(payload.get("name", "")).strip()
+        if not name:
+            abort(400, description="Student name is required")
+
+        try:
+            student = store.add_student(name)
+        except ValueError as exc:
+            abort(409, description=str(exc))
+        if _STUDENT_RECOGNIZER is not None:
+            _STUDENT_RECOGNIZER.rebuild()
+
+        return (
+            jsonify(
+                {
+                    "student": {
+                        "id": student.id,
+                        "name": student.name,
+                        "created_at": student.created_at.isoformat(),
+                        "last_seen_at": None,
+                        "sample_count": 0,
+                    }
+                }
+            ),
+            201,
+        )
+
+    @app.route("/api/students/<int:student_id>/samples", methods=["GET"])
+    def api_student_samples(student_id: int) -> Response:
+        if _ATTENDANCE_STORE is None:
+            abort(503, description="Attendance module is disabled")
+
+        store = _ATTENDANCE_STORE
+        student = store.get_student(student_id)
+        if student is None:
+            abort(404, description="Student not found")
+
+        samples = [
+            {
+                "id": sample.id,
+                "image_url": f"/student_samples/{sample.image_path.relative_to(store.samples_dir).as_posix()}",
+                "created_at": sample.created_at.isoformat(),
+            }
+            for sample in store.list_samples(student_id)
+        ]
+        return jsonify({"student": {"id": student.id, "name": student.name}, "samples": samples})
+
+    @app.route("/api/students/<int:student_id>/samples/<int:sample_id>", methods=["DELETE", "OPTIONS"])
+    def api_student_sample_delete(student_id: int, sample_id: int) -> Response:
+        if request.method == "OPTIONS":
+            response = jsonify({"allowed": ["DELETE"]})
+            response.headers["Allow"] = "DELETE, OPTIONS"
+            return response
+
+        if _ATTENDANCE_STORE is None:
+            abort(503, description="Attendance module is disabled")
+
+        store = _ATTENDANCE_STORE
+        student = store.get_student(student_id)
+        if student is None:
+            abort(404, description="Student not found")
+
+        sample = store.get_sample(sample_id)
+        if sample is None or sample.student_id != student_id:
+            abort(404, description="Sample not found")
+
+        deleted = store.delete_sample(sample_id)
+        if not deleted:
+            abort(500, description="Unable to delete sample")
+
+        if _STUDENT_RECOGNIZER is not None:
+            try:
+                _STUDENT_RECOGNIZER.rebuild()
+            except Exception as exc:  # pragma: no cover - defensive
+                abort(500, description=f"Sample removed but recognizer rebuild failed: {exc}")
+
+        return jsonify({"deleted": True, "sample_id": sample_id})
+
+    @app.route("/api/students/<int:student_id>/capture", methods=["POST"])
+    def api_student_capture(student_id: int) -> Response:
+        if _ATTENDANCE_STORE is None:
+            abort(503, description="Attendance module is disabled")
+
+        store = _ATTENDANCE_STORE
+        student = store.get_student(student_id)
+        if student is None:
+            abort(404, description="Student not found")
+
+        with _FRAME_LOCK:
+            if _LATEST_RAW_FRAME is not None:
+                frame = _LATEST_RAW_FRAME.copy()
+            elif _LATEST_FRAME is not None:
+                frame = _LATEST_FRAME.copy()
+            else:
+                frame = None
+
+        if frame is None:
+            abort(503, description="Camera frame unavailable")
+
+        faces = detect_faces(frame)
+        if not faces:
+            abort(422, description="No face detected in current frame")
+
+        largest = max(faces, key=lambda f: (f[2] - f[0]) * (f[3] - f[1]))
+        face_image = crop_face(frame, largest[:4])
+        if face_image is None or face_image.size == 0:
+            abort(422, description="Unable to crop face from frame")
+
+        try:
+            sample = store.add_sample(student_id, face_image)
+        except Exception as exc:
+            abort(500, description=f"Unable to store sample: {exc}")
+
+        if _STUDENT_RECOGNIZER is not None:
+            try:
+                _STUDENT_RECOGNIZER.rebuild()
+            except Exception as exc:  # pragma: no cover - defensive
+                abort(500, description=f"Sample saved but recognizer rebuild failed: {exc}")
+
+        return (
+            jsonify(
+                {
+                    "sample": {
+                        "id": sample.id,
+                        "image_url": f"/student_samples/{sample.image_path.relative_to(store.samples_dir).as_posix()}",
+                        "created_at": sample.created_at.isoformat(),
+                    }
+                }
+            ),
+            201,
+        )
+
+    @app.route("/api/attendance/logs")
+    def api_attendance_logs() -> Response:
+        if _ATTENDANCE_STORE is None:
+            return jsonify({"enabled": False, "records": []})
+
+        store = _ATTENDANCE_STORE
+        limit = request.args.get("limit", default=50, type=int)
+        records = store.recent_attendance(limit=limit)
+
+        student_map: Dict[int, Student] = {student.id: student for student in store.list_students()}
+        items = []
+        for record in records:
+            student = student_map.get(record.student_id)
+            items.append(
+                {
+                    "id": record.id,
+                    "student_id": record.student_id,
+                    "student_name": student.name if student else f"#{record.student_id}",
+                    "event_type": record.event_type,
+                    "timestamp": record.timestamp.isoformat(),
+                    "confidence": record.confidence,
+                }
+            )
+        summary = store.attendance_summary()
+        return jsonify({"enabled": True, "records": items, "attendance": summary})
+
+    @app.route("/api/attendance/report")
+    def api_attendance_report() -> Response:
+        if _ATTENDANCE_STORE is None:
+            return jsonify(
+                {
+                    "enabled": False,
+                    "records": [],
+                    "filters": {"years": [], "months": [], "days": []},
+                    "selected": {"year": None, "month": None, "day": None},
+                }
+            )
+
+        def normalize_year(value: Optional[str]) -> Optional[str]:
+            if value is None:
+                return None
+            value = value.strip()
+            if not value:
+                return None
+            if not value.isdigit():
+                abort(400, description="Invalid year")
+            return f"{int(value):04d}"
+
+        def normalize_month(value: Optional[str]) -> Optional[str]:
+            if value is None:
+                return None
+            value = value.strip()
+            if not value:
+                return None
+            if not value.isdigit():
+                abort(400, description="Invalid month")
+            month_value = int(value)
+            if month_value < 1 or month_value > 12:
+                abort(400, description="Invalid month")
+            return f"{month_value:02d}"
+
+        def normalize_day(value: Optional[str]) -> Optional[str]:
+            if value is None:
+                return None
+            value = value.strip()
+            if not value:
+                return None
+            if not value.isdigit():
+                abort(400, description="Invalid day")
+            day_value = int(value)
+            if day_value < 1 or day_value > 31:
+                abort(400, description="Invalid day")
+            return f"{day_value:02d}"
+
+        year_param = normalize_year(request.args.get("year"))
+        month_param = normalize_month(request.args.get("month"))
+        day_param = normalize_day(request.args.get("day"))
+        format_param = (request.args.get("format") or "").lower()
+
+        store = _ATTENDANCE_STORE
+        filters = store.attendance_report_filters(year=year_param, month=month_param)
+        records = store.attendance_report(year=year_param, month=month_param, day=day_param)
+
+        if format_param == "csv":
+            buffer = io.StringIO()
+            writer = csv.writer(buffer)
+            writer.writerow(["#", "Student", "First Check In", "Last Check Out"])
+            for index, record in enumerate(records, start=1):
+                writer.writerow(
+                    [
+                        index,
+                        record["student_name"],
+                        record["first_check_in"] or "",
+                        record["last_check_out"] or "",
+                    ]
+                )
+            filename_parts = [part for part in (year_param, month_param, day_param) if part]
+            label = "-".join(filename_parts) if filename_parts else "all"
+            response = Response(buffer.getvalue(), mimetype="text/csv")
+            response.headers["Content-Disposition"] = f'attachment; filename="attendance_report_{label}.csv"'
+            return response
+
+        return jsonify(
+            {
+                "enabled": True,
+                "records": records,
+                "filters": filters,
+                "selected": {"year": year_param, "month": month_param, "day": day_param},
+            }
+        )
+
+
     @app.route("/snapshots/<path:filename>")
     def snapshots(filename: str) -> Response:
         if _GLOBAL_SETTINGS is None:
@@ -1028,6 +1578,17 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
             abort(404)
         relative = target.relative_to(snapshot_dir)
         return send_from_directory(str(snapshot_dir), relative.as_posix())
+
+    @app.route("/student_samples/<path:filename>")
+    def student_samples(filename: str) -> Response:
+        if _ATTENDANCE_STORE is None:
+            abort(404)
+        sample_dir = _ATTENDANCE_STORE.samples_dir.resolve()
+        target = (sample_dir / Path(filename)).resolve()
+        if not str(target).startswith(str(sample_dir)) or not target.exists():
+            abort(404)
+        relative = target.relative_to(sample_dir)
+        return send_from_directory(str(sample_dir), relative.as_posix())
 
     try:
         app.run(host=host, port=port, debug=False, threaded=True, use_reloader=False)
