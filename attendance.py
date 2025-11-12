@@ -331,15 +331,16 @@ class AttendanceStore:
     # ------------------------------------------------------------- attendance
 
     def _determine_event_type(self, student_id: int, timestamp: dt.datetime) -> str:
-        date_prefix = timestamp.date().isoformat()
+        local_date = timestamp.astimezone().date().isoformat()
         with sqlite3.connect(self._db_path) as conn:
             row = conn.execute(
                 """
                 SELECT event_type FROM attendance_logs
-                WHERE student_id = ? AND substr(timestamp, 1, 10) = ?
+                WHERE student_id = ?
+                  AND date(timestamp, 'localtime') = ?
                 ORDER BY timestamp DESC LIMIT 1
                 """,
-                (student_id, date_prefix),
+                (student_id, local_date),
             ).fetchone()
 
         if row is None or row[0] == "check_out":
@@ -399,14 +400,8 @@ class AttendanceStore:
     # -------------------------------------------------------------- statistics
 
     def attendance_summary(self, *, date: Optional[dt.date] = None) -> Dict[str, int]:
-        """
-        Return total check-ins and check-outs for the specified (UTC) date.
-
-        When no date is provided we align with the UTC timeline used for storing
-        attendance records to avoid off-by-one issues in regions with a positive
-        or negative offset from UTC.
-        """
-        target = date or _utc_now().date()
+        """Return total check-ins and check-outs for the specified local date."""
+        target = date or dt.datetime.now().astimezone().date()
         prefix = target.isoformat()
         with sqlite3.connect(self._db_path) as conn:
             totals = conn.execute(
@@ -415,7 +410,7 @@ class AttendanceStore:
                     SUM(CASE WHEN event_type = 'check_in' THEN 1 ELSE 0 END),
                     SUM(CASE WHEN event_type = 'check_out' THEN 1 ELSE 0 END)
                 FROM attendance_logs
-                WHERE substr(timestamp, 1, 10) = ?
+                WHERE date(timestamp, 'localtime') = ?
                 """,
                 (prefix,),
             ).fetchone()
@@ -428,17 +423,18 @@ class AttendanceStore:
         with sqlite3.connect(self._db_path) as conn:
             year_rows = conn.execute(
                 """
-                SELECT DISTINCT substr(timestamp, 1, 4) AS year
+                SELECT DISTINCT strftime('%Y', timestamp, 'localtime') AS year
                 FROM attendance_logs
+                WHERE timestamp IS NOT NULL
                 ORDER BY year DESC
                 """
             ).fetchall()
             years = [str(row[0]) for row in year_rows if row[0] is not None]
 
-            month_query = "SELECT DISTINCT substr(timestamp, 6, 2) AS month FROM attendance_logs"
+            month_query = "SELECT DISTINCT strftime('%m', timestamp, 'localtime') AS month FROM attendance_logs"
             month_params: List[object] = []
             if year:
-                month_query += " WHERE substr(timestamp, 1, 4) = ?"
+                month_query += " WHERE strftime('%Y', timestamp, 'localtime') = ?"
                 month_params.append(year)
             month_query += " ORDER BY month DESC"
             month_rows = conn.execute(month_query, month_params).fetchall()
@@ -446,14 +442,14 @@ class AttendanceStore:
 
             days: List[str] = []
             if year or month:
-                day_query = "SELECT DISTINCT substr(timestamp, 9, 2) AS day FROM attendance_logs"
+                day_query = "SELECT DISTINCT strftime('%d', timestamp, 'localtime') AS day FROM attendance_logs"
                 conditions: List[str] = []
                 params: List[object] = []
                 if year:
-                    conditions.append("substr(timestamp, 1, 4) = ?")
+                    conditions.append("strftime('%Y', timestamp, 'localtime') = ?")
                     params.append(year)
                 if month:
-                    conditions.append("substr(timestamp, 6, 2) = ?")
+                    conditions.append("strftime('%m', timestamp, 'localtime') = ?")
                     params.append(month)
                 if conditions:
                     day_query += " WHERE " + " AND ".join(conditions)
@@ -474,13 +470,13 @@ class AttendanceStore:
         params: List[object] = []
 
         if year:
-            join_conditions.append("substr(a.timestamp, 1, 4) = ?")
+            join_conditions.append("strftime('%Y', a.timestamp, 'localtime') = ?")
             params.append(year)
         if month:
-            join_conditions.append("substr(a.timestamp, 6, 2) = ?")
+            join_conditions.append("strftime('%m', a.timestamp, 'localtime') = ?")
             params.append(month)
         if day:
-            join_conditions.append("substr(a.timestamp, 9, 2) = ?")
+            join_conditions.append("strftime('%d', a.timestamp, 'localtime') = ?")
             params.append(day)
 
         join_clause = " AND ".join(join_conditions)

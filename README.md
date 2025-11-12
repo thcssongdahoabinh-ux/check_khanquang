@@ -55,6 +55,7 @@ camera feed.
 Editable settings live in `config/config.yaml`. New options include:
 
 - `attendance_enabled` – master switch for the attendance workflow.
+- `red_min_pixels` – minimum absolute red pixel count (after masking) to treat a scarf as present, helping close-range detections.
 - `student_samples_dir` – storage root for captured face samples.
 - `attendance_confidence_threshold` – minimum confidence (0–1) required to log
   attendance after recognition.

@@ -118,6 +118,7 @@ class Settings:
     imgsz: int
     confidence: float
     red_ratio_threshold: float
+    red_min_pixels: int
     cooldown_seconds: float
     tracker_distance: float
     tracker_expiry: float
@@ -146,6 +147,7 @@ _CONFIG_FIELD_TYPES: Dict[str, type] = {
     "img_size": int,
     "confidence_threshold": float,
     "red_ratio_threshold": float,
+    "red_min_pixels": int,
     "cooldown_seconds": float,
     "cooldown_expiry_seconds": float,
     "tracker_distance": float,
@@ -198,6 +200,7 @@ def load_settings(config_path: Path) -> Settings:
         imgsz=int(data.get("img_size", 640)),
         confidence=float(data.get("confidence_threshold", 0.6)),
         red_ratio_threshold=float(data.get("red_ratio_threshold", 0.08)),
+        red_min_pixels=int(data.get("red_min_pixels", 1500)),
         cooldown_seconds=float(data.get("cooldown_seconds", 10)),
         tracker_distance=float(data.get("tracker_distance", 80)),
         tracker_expiry=float(data.get("cooldown_expiry_seconds", 15)),
@@ -404,6 +407,10 @@ class AttendanceManager:
             record = self._store.record_attendance(recognition.student_id, confidence=recognition.confidence)
             self._last_logged[recognition.student_id] = now
         return record
+
+    @property
+    def confidence_threshold(self) -> float:
+        return self._confidence_threshold
 
 
 # ---------------------------------------------------------------------------
@@ -638,20 +645,32 @@ def within_time_window(settings: Settings) -> bool:
 def neck_box_from_bbox(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, int, int]) -> Tuple[int, int, int, int]:
     x1, y1, x2, y2 = bbox
     h, w = frame_shape[:2]
-    bw = x2 - x1
-    bh = y2 - y1
-    cx = int(x1 + bw * 0.5)
-    cy = int(y1 + bh * 0.18)
-    nw = max(int(bw * 0.5), 120)
-    nh = max(int(bh * 0.18), 80)
-    nx1 = max(cx - nw // 2, 0)
-    ny1 = max(cy - nh // 2, 0)
-    nx2 = min(cx + nw // 2, w)
-    ny2 = min(cy + nh // 2, h)
+    bw = max(x2 - x1, 1)
+    bh = max(y2 - y1, 1)
+
+    cx = x1 + bw // 2
+    # Keep the neck crop near the upper torso but not too tall.
+    cy = y1 + int(bh * 0.28)
+
+    neck_width = int(np.clip(bw * 0.45, 80, 220))
+    neck_height = int(np.clip(bh * 0.30, 60, 160))
+
+    nx1 = max(cx - neck_width // 2, 0)
+    ny1 = max(cy - neck_height // 2, 0)
+    nx2 = min(nx1 + neck_width, w)
+    ny2 = min(ny1 + neck_height, h)
+
+    # If the neck box was clamped by the frame bounds, adjust the origin to preserve size.
+    nx1 = max(nx2 - neck_width, 0)
+    ny1 = max(ny2 - neck_height, 0)
+
     return nx1, ny1, nx2 - nx1, ny2 - ny1
 
 
-def neck_box_from_pose(frame: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
+def neck_box_from_pose(
+    frame: np.ndarray,
+    person_bbox: Optional[Tuple[int, int, int, int]] = None,
+) -> Optional[Tuple[int, int, int, int]]:
     if MP_POSE is None:
         return None
 
@@ -659,6 +678,76 @@ def neck_box_from_pose(frame: np.ndarray) -> Optional[Tuple[int, int, int, int]]
     results = MP_POSE.process(rgb)
     if not results.pose_landmarks:
         return None
+
+    landmarks = results.pose_landmarks.landmark
+    if len(landmarks) <= 12:
+        return None
+
+    h, w = frame.shape[:2]
+
+    def _to_px(index: int) -> Optional[Tuple[int, int, float]]:
+        if index >= len(landmarks):
+            return None
+        landmark = landmarks[index]
+        visibility = getattr(landmark, "visibility", 0.0)
+        if visibility < 0.2:
+            return None
+        x = int(np.clip(landmark.x * w, 0, max(w - 1, 0)))
+        y = int(np.clip(landmark.y * h, 0, max(h - 1, 0)))
+        return x, y, visibility
+
+    left = _to_px(11)
+    right = _to_px(12)
+    nose = _to_px(0)
+
+    if left is None or right is None or nose is None:
+        return None
+
+    lx, ly, _ = left
+    rx, ry, _ = right
+    nx, ny, _ = nose
+
+    shoulder_dist = float(np.hypot(rx - lx, ry - ly))
+    if shoulder_dist < 20:
+        return None
+
+    cx = int((lx + rx) * 0.5)
+    shoulder_y = int((ly + ry) * 0.5)
+    neck_center_y = int(ny + 0.6 * (shoulder_y - ny))
+
+    neck_width = int(np.clip(shoulder_dist * 1.05, 80, 240))
+    neck_height = int(np.clip(shoulder_dist * 0.9, 60, 200))
+
+    nx1 = max(cx - neck_width // 2, 0)
+    ny1 = max(neck_center_y - neck_height // 2, 0)
+    nx2 = min(cx + neck_width // 2, w)
+    ny2 = min(neck_center_y + neck_height // 2, h)
+
+    if person_bbox is not None:
+        px1, py1, px2, py2 = person_bbox
+        nx1 = max(nx1, px1)
+        ny1 = max(ny1, py1)
+        nx2 = min(nx2, px2)
+        ny2 = min(ny2, py2)
+        if nx2 <= nx1 or ny2 <= ny1:
+            return None
+
+    if nx2 <= nx1 or ny2 <= ny1:
+        return None
+
+    return nx1, ny1, nx2 - nx1, ny2 - ny1
+
+
+def mask_neck_upper_band(crop: Optional[np.ndarray], ratio: float = 0.3) -> Optional[np.ndarray]:
+    if crop is None or crop.size == 0:
+        return crop
+    h = crop.shape[0]
+    guard = int(max(0, min(h * ratio, h - 1)))
+    if guard <= 0:
+        return crop
+    guarded = crop.copy()
+    guarded[:guard, :, :] = 0
+    return guarded
 
 
 def detect_faces(frame: np.ndarray) -> List[Tuple[int, int, int, int, float]]:
@@ -763,9 +852,9 @@ def face_for_person(frame: np.ndarray, person_bbox: Tuple[int, int, int, int]) -
         return None
 
 
-def red_ratio(crop: np.ndarray) -> Tuple[float, Optional[Tuple[int, int, int, int]]]:
+def red_ratio(crop: np.ndarray) -> Tuple[float, int, Optional[Tuple[int, int, int, int]]]:
     if crop is None or crop.size == 0:
-        return 0.0, None
+        return 0.0, 0, None
 
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     lower_red1 = np.array([0, 70, 50], dtype=np.uint8)
@@ -782,21 +871,21 @@ def red_ratio(crop: np.ndarray) -> Tuple[float, Optional[Tuple[int, int, int, in
 
     total_pixels = mask.size
     if total_pixels == 0:
-        return 0.0, None
+        return 0.0, 0, None
 
     red_pixels = cv2.countNonZero(mask)
     ratio = red_pixels / float(total_pixels)
 
     if red_pixels == 0:
-        return ratio, None
+        return ratio, red_pixels, None
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
-        return ratio, None
+        return ratio, red_pixels, None
 
     largest = max(contours, key=cv2.contourArea)
     rx, ry, rw, rh = cv2.boundingRect(largest)
-    return ratio, (rx, ry, rw, rh)
+    return ratio, red_pixels, (rx, ry, rw, rh)
 
 
 def save_snapshot(settings: Settings, frame: np.ndarray, track_id: int) -> Path:
@@ -955,18 +1044,23 @@ def run_monitor(
             track_id = assigned_ids[idx] if idx < len(assigned_ids) else -1
             confidence = confidences[idx]
 
-            neck = neck_box_from_pose(frame)
+            neck = neck_box_from_pose(frame, bbox)
             if neck is None:
                 neck = neck_box_from_bbox(bbox, frame.shape)
 
             nx, ny, nw, nh = neck
             crop = frame[ny : ny + nh, nx : nx + nw]
-            ratio, red_bbox = red_ratio(crop)
-            has_scarf = ratio >= settings.red_ratio_threshold
+            crop = mask_neck_upper_band(crop)
+            ratio, red_pixels, red_bbox = red_ratio(crop)
+            has_scarf = ratio >= settings.red_ratio_threshold or red_pixels >= settings.red_min_pixels
 
-            person_color = (0, 255, 0)
+            person_color = (70, 135, 240)
             scarf_color = (0, 0, 255)
             no_scarf_color = (0, 165, 255)
+            highlight_color = (72, 201, 91)
+            recognized_highlight = False
+            name_label: Optional[str] = None
+            label_box: Optional[Tuple[int, int, int, int]] = None
 
             status = f"Scarf: {'YES' if has_scarf else 'NO'} {ratio * 100:.1f}% ID:{track_id}"
             cv2.rectangle(frame, (x1, y1), (x2, y2), person_color, 2)
@@ -981,8 +1075,6 @@ def run_monitor(
             else:
                 cv2.rectangle(frame, (nx, ny), (nx + nw, ny + nh), no_scarf_color, 2)
                 status_color = no_scarf_color
-
-            cv2.putText(frame, status, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color, 2)
 
             if has_scarf:
                 scarf_count += 1
@@ -1007,16 +1099,16 @@ def run_monitor(
                         student = attendance_store.get_student(recognition.student_id)
                         if student is not None:
                             recognized_count += 1
-                            label_text = f"{student.name} {recognition.confidence * 100:.0f}%"
-                            cv2.putText(
-                                frame,
-                                label_text,
-                                (x1, y2 + 20),
-                                cv2.FONT_HERSHEY_SIMPLEX,
-                                0.6,
-                                (173, 216, 230),
-                                2,
+                            recognized_highlight = True
+                            name_label = f"{student.name} {recognition.confidence * 100:.0f}%"
+                            (text_width, text_height), baseline = cv2.getTextSize(
+                                name_label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
                             )
+                            label_left = max(x1, 0)
+                            label_bottom = max(y1 - 6, text_height + baseline + 6)
+                            label_top = max(label_bottom - text_height - baseline - 6, 0)
+                            label_right = min(label_left + text_width + 12, frame.shape[1] - 1)
+                            label_box = (label_left, label_top, label_right, label_bottom)
                             if attendance_manager:
                                 record = attendance_manager.mark_attendance(recognition)
                                 if record:
@@ -1024,6 +1116,35 @@ def run_monitor(
                                     last_attendance_text = (
                                         f"{student.name} {event_label} @ {dt.datetime.now().strftime('%H:%M:%S')}"
                                     )
+                                else:
+                                    threshold = attendance_manager.confidence_threshold
+                                    if recognition.confidence < threshold:
+                                        last_attendance_text = (
+                                            f"{student.name} below attendance threshold "
+                                            f"({recognition.confidence * 100:.0f}% < {threshold * 100:.0f}%)"
+                                        )
+                                    elif not last_attendance_text:
+                                        last_attendance_text = (
+                                            f"{student.name} seen recently (cooldown active)"
+                                        )
+
+            status_color = highlight_color if recognized_highlight else status_color
+            cv2.putText(frame, status, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color, 2)
+
+            if recognized_highlight:
+                cv2.rectangle(frame, (x1, y1), (x2, y2), highlight_color, 3)
+                if label_box is not None and name_label is not None:
+                    lx1, ly1, lx2, ly2 = label_box
+                    cv2.rectangle(frame, (lx1, ly1), (lx2, ly2), highlight_color, cv2.FILLED)
+                    cv2.putText(
+                        frame,
+                        name_label,
+                        (lx1 + 6, ly2 - baseline - 2),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (12, 30, 12),
+                        2,
+                    )
 
         now = time.time()
         elapsed = now - last_time
@@ -1677,10 +1798,29 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
         month_param = normalize_month(request.args.get("month"))
         day_param = normalize_day(request.args.get("day"))
         format_param = (request.args.get("format") or "").lower()
+        default_scope = (request.args.get("default") or "").strip().lower()
+
+        if default_scope == "today" and not any([year_param, month_param, day_param]):
+            today_local = dt.datetime.now().astimezone()
+            year_param = today_local.strftime("%Y")
+            month_param = today_local.strftime("%m")
+            day_param = today_local.strftime("%d")
 
         store = _ATTENDANCE_STORE
         filters = store.attendance_report_filters(year=year_param, month=month_param)
         records = store.attendance_report(year=year_param, month=month_param, day=day_param)
+
+        def _ensure_option(values: List[str], selected: Optional[str]) -> List[str]:
+            if not selected:
+                return values
+            if selected not in values:
+                values = values + [selected]
+                values.sort(key=lambda item: int(item), reverse=True)
+            return values
+
+        filters["years"] = _ensure_option(filters.get("years", []), year_param)
+        filters["months"] = _ensure_option(filters.get("months", []), month_param)
+        filters["days"] = _ensure_option(filters.get("days", []), day_param)
 
         if format_param == "csv":
             buffer = io.StringIO()

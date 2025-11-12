@@ -383,6 +383,14 @@
 
             try {
                 const params = buildParams();
+                const shouldDefaultToToday =
+                    !retainSelections &&
+                    state.year === 'all' &&
+                    state.month === 'all' &&
+                    state.day === 'all';
+                if (shouldDefaultToToday) {
+                    params.set('default', 'today');
+                }
                 const query = params.toString();
                 const response = await fetch(query ? `api/attendance/report?${query}` : 'api/attendance/report', { cache: 'no-store' });
                 if (!response.ok) {
