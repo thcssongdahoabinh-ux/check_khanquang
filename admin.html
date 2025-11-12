@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Attendance Admin</title>
+    <title data-i18n="admin.pageTitle">Attendance Admin</title>
     <style>
         :root {
             color-scheme: dark;
@@ -26,6 +26,17 @@
             align-items: center;
             flex-wrap: wrap;
             gap: 1rem;
+        }
+        .title-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+        .header-actions {
+            display: inline-flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            align-items: center;
         }
         h1 {
             margin: 0;
@@ -111,6 +122,57 @@
         }
         tbody tr.active {
             background: rgba(96, 165, 250, 0.18);
+        }
+        .table-actions {
+            display: inline-flex;
+            gap: 0.4rem;
+        }
+        .table-action-btn {
+            padding: 0.35rem 0.9rem;
+            border-radius: 999px;
+            border: none;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+            color: #0f172a;
+            background: linear-gradient(135deg, #38bdf8, #6366f1);
+        }
+        .table-action-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 18px rgba(99, 102, 241, 0.35);
+        }
+        .table-action-btn.danger {
+            background: linear-gradient(135deg, #fb7185, #f97316);
+            color: #0f172a;
+        }
+        .language-select {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.4rem 0.8rem;
+            border-radius: 999px;
+            background: rgba(148, 163, 184, 0.15);
+            color: #cbd5f5;
+            font-size: 0.85rem;
+        }
+        .language-select span {
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .language-select select {
+            appearance: none;
+            background: transparent;
+            border: none;
+            color: #f8fafc;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 0;
+            min-width: 90px;
+        }
+        .language-select select:focus {
+            outline: none;
         }
         .stats {
             display: flex;
@@ -278,20 +340,29 @@
 <body>
     <main>
         <header>
-            <div>
-                <h1>Attendance Admin</h1>
-                <p style="color:#94a3b8;">Manage student identities and attendance logs</p>
+            <div class="title-group">
+                <h1 data-i18n="admin.heading">Attendance Admin</h1>
+                <p style="color:#94a3b8;" data-i18n="admin.subtitle">Manage student identities and attendance logs</p>
             </div>
-            <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
-                <a class="button" href="webcam.html">Back to Monitor</a>
-                <a class="button" href="attendance_report.html">Attendance Report</a>
+            <div class="header-actions">
+                <div class="language-select">
+                    <span data-i18n="common.language">Language</span>
+                    <select id="languageSelect" data-i18n-aria-label="common.selectLanguage">
+                        <option value="en" data-i18n="common.english">English</option>
+                        <option value="vi" data-i18n="common.vietnamese">Tiếng Việt</option>
+                    </select>
+                </div>
+                <a class="button" href="webcam.html" data-i18n="common.backToMonitor">Back to Monitor</a>
+                <a class="button" href="settings.html" data-i18n="common.settings">Settings</a>
+                <a class="button" href="attendance_report.html" data-i18n="common.attendanceReport">Attendance Report</a>
+                <a class="button" href="admin-logout" data-i18n="common.logout">Logout</a>
             </div>
         </header>
 
         <section class="card">
             <form id="addStudentForm">
-                <input type="text" id="studentNameInput" placeholder="Student name" autocomplete="off" required />
-                <button type="submit">Add Student</button>
+                <input type="text" id="studentNameInput" placeholder="Student name" data-i18n-placeholder="admin.addForm.placeholder" autocomplete="off" required />
+                <button type="submit" data-i18n="admin.addForm.submit">Add Student</button>
             </form>
         </section>
 
@@ -299,30 +370,31 @@
             <div class="card" style="overflow:auto;">
                 <div class="stats" id="attendanceStats">
                     <div class="stat">
-                        <span>Check-ins</span>
+                        <span data-i18n="admin.stats.checkIns">Check-ins</span>
                         <span id="checkInCount">0</span>
                     </div>
                     <div class="stat">
-                        <span>Check-outs</span>
+                        <span data-i18n="admin.stats.checkOuts">Check-outs</span>
                         <span id="checkOutCount">0</span>
                     </div>
                     <div class="stat">
-                        <span>Total Students</span>
+                        <span data-i18n="admin.stats.totalStudents">Total Students</span>
                         <span id="studentTotalCount">0</span>
                     </div>
                 </div>
 
-                <h2 style="margin:1.2rem 0 0.5rem;">Students</h2>
+                <h2 style="margin:1.2rem 0 0.5rem;" data-i18n="admin.table.heading">Students</h2>
                 <table>
                     <thead>
                         <tr>
-                            <th style="text-align:left;">Name</th>
-                            <th>Samples</th>
-                            <th>Last Seen</th>
+                            <th style="text-align:left;" data-i18n="admin.table.columns.name">Name</th>
+                            <th data-i18n="admin.table.columns.samples">Samples</th>
+                            <th data-i18n="admin.table.columns.lastSeen">Last Seen</th>
+                            <th style="text-align:right;" data-i18n="admin.table.columns.actions">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="studentsTableBody">
-                        <tr><td colspan="3" style="padding:1.2rem; text-align:center; color:#94a3b8;">Loading...</td></tr>
+                        <tr><td colspan="4" style="padding:1.2rem; text-align:center; color:#94a3b8;" data-i18n="admin.table.loading">Loading...</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -330,16 +402,16 @@
             <div class="card">
                 <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem;">
                     <div>
-                        <h2 id="selectedStudentTitle" style="margin:0 0 0.4rem;">Select a student</h2>
-                        <p id="selectedStudentMeta" style="margin:0; color:#94a3b8; font-size:0.9rem;">Capture samples to improve recognition accuracy.</p>
+                        <h2 id="selectedStudentTitle" style="margin:0 0 0.4rem;" data-i18n="admin.selection.noneTitle">Select a student</h2>
+                        <p id="selectedStudentMeta" style="margin:0; color:#94a3b8; font-size:0.9rem;" data-i18n="admin.selection.noneSubtitle">Capture samples to improve recognition accuracy.</p>
                     </div>
-                    <button id="captureSampleButton" disabled>Capture Sample</button>
+                    <button id="captureSampleButton" disabled data-i18n="admin.capture.button">Capture Sample</button>
                 </div>
                 <div style="margin-top:1.2rem;">
                     <div class="capture-preview" id="capturePreview" style="display:none;">
                         <header>
-                            <span>Live Capture Preview</span>
-                            <span id="capturePreviewStatus" class="preview-status" data-state="idle">Idle</span>
+                            <span data-i18n="admin.preview.title">Live Capture Preview</span>
+                            <span id="capturePreviewStatus" class="preview-status" data-state="idle" data-i18n="admin.preview.status.idle">Idle</span>
                         </header>
                         <div class="capture-preview-body">
                             <img id="capturePreviewFeed" src="" alt="Live capture preview">
@@ -347,22 +419,23 @@
                         </div>
                     </div>
                     <div id="samplesContainer" class="samples-grid"></div>
-                    <div id="samplesEmptyState" class="empty-state" style="display:none;">No samples yet. Capture one to get started.</div>
+                    <div id="samplesEmptyState" class="empty-state" style="display:none;" data-i18n="admin.samples.empty">No samples yet. Capture one to get started.</div>
                 </div>
             </div>
         </section>
 
         <section class="card">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
-                <h2 style="margin:0;">Attendance Logs</h2>
-                <span class="badge" id="attendanceTotalBadge">0 entries</span>
+                <h2 style="margin:0;" data-i18n="admin.attendance.heading">Attendance Logs</h2>
+                <span class="badge" id="attendanceTotalBadge" data-i18n="admin.attendance.badge" data-i18n-args='{"count":"0"}'>0 entries</span>
             </div>
             <div id="attendanceList" class="attendance-list" style="margin-top:1.2rem;">
-                <div class="empty-state">Logs will appear here once attendance is recorded.</div>
+                <div class="empty-state" data-i18n="admin.attendance.empty">Logs will appear here once attendance is recorded.</div>
             </div>
         </section>
     </main>
 
+    <script src="i18n.js"></script>
     <script>
         const studentsTableBody = document.getElementById('studentsTableBody');
         const checkInCountEl = document.getElementById('checkInCount');
@@ -382,11 +455,116 @@
         const addStudentForm = document.getElementById('addStudentForm');
         const studentNameInput = document.getElementById('studentNameInput');
 
+        const I18N_API = window.I18N || {};
+        const t = (key, replacements) => (typeof I18N_API.t === 'function' ? I18N_API.t(key, replacements) : key);
+
         let studentsCache = [];
         let selectedStudentId = null;
         let isCapturing = false;
         let previewActive = false;
         let previewReconnectTimer = null;
+
+        function translateOrDefault(key, fallback, replacements) {
+            const translated = t(key, replacements);
+            return translated && translated !== key ? translated : fallback;
+        }
+
+        function formatDisplayDate(value) {
+            if (!value) {
+                return t('admin.selection.never');
+            }
+            try {
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) {
+                    return value;
+                }
+                if (typeof I18N_API.formatDate === 'function') {
+                    return I18N_API.formatDate(date);
+                }
+                return date.toLocaleString();
+            } catch {
+                return value;
+            }
+        }
+
+        function formatDisplayDateTime(value) {
+            if (!value) {
+                return '--';
+            }
+            try {
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) {
+                    return value;
+                }
+                if (typeof I18N_API.formatDate === 'function') {
+                    return I18N_API.formatDate(date);
+                }
+                return date.toLocaleString();
+            } catch {
+                return value;
+            }
+        }
+
+        function formatNumber(value) {
+            if (typeof I18N_API.formatNumber === 'function') {
+                return I18N_API.formatNumber(value);
+            }
+            return new Intl.NumberFormat().format(value ?? 0);
+        }
+
+        function setStudentsTableMessage(key, replacements = {}, color = '#94a3b8') {
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 4;
+            cell.style.padding = '1.2rem';
+            cell.style.textAlign = 'center';
+            cell.style.color = color;
+            cell.dataset.i18n = key;
+            if (replacements && Object.keys(replacements).length) {
+                cell.dataset.i18nArgs = JSON.stringify(replacements);
+            } else {
+                delete cell.dataset.i18nArgs;
+            }
+            cell.textContent = t(key, replacements);
+            row.append(cell);
+            studentsTableBody.innerHTML = '';
+            studentsTableBody.append(row);
+        }
+
+        function updateAttendanceBadge(count) {
+            if (!attendanceTotalBadge) {
+                return;
+            }
+            const args = { count: String(count) };
+            attendanceTotalBadge.dataset.i18n = 'admin.attendance.badge';
+            attendanceTotalBadge.dataset.i18nArgs = JSON.stringify(args);
+            attendanceTotalBadge.textContent = t('admin.attendance.badge', args);
+        }
+
+        function renderAttendanceMessage(key, replacements = {}) {
+            attendanceList.innerHTML = '';
+            const message = document.createElement('div');
+            message.className = 'empty-state';
+            message.dataset.i18n = key;
+            if (replacements && Object.keys(replacements).length) {
+                message.dataset.i18nArgs = JSON.stringify(replacements);
+            } else {
+                delete message.dataset.i18nArgs;
+            }
+            message.textContent = t(key, replacements);
+            attendanceList.append(message);
+        }
+
+        function formatAttendanceEventType(eventType) {
+            switch (eventType) {
+                case 'check_in':
+                    return translateOrDefault('webcam.attendanceFeed.eventType.checkIn', 'Check In');
+                case 'check_out':
+                    return translateOrDefault('webcam.attendanceFeed.eventType.checkOut', 'Check Out');
+                default:
+                    return translateOrDefault('webcam.attendanceFeed.eventType.unknown', 'Unknown');
+            }
+        }
 
         function stopPreviewReconnectTimer() {
             if (previewReconnectTimer) {
@@ -395,30 +573,30 @@
             }
         }
 
-        function setPreviewState(state, message) {
+        function setPreviewState(state, messageKey) {
             if (capturePreviewStatus) {
                 capturePreviewStatus.dataset.state = state;
-                switch (state) {
-                    case 'online':
-                        capturePreviewStatus.textContent = 'Online';
-                        break;
-                    case 'connecting':
-                        capturePreviewStatus.textContent = 'Connecting...';
-                        break;
-                    case 'error':
-                        capturePreviewStatus.textContent = 'Offline';
-                        break;
-                    default:
-                        capturePreviewStatus.textContent = 'Idle';
-                        break;
-                }
+                const statusKey = state === 'error' ? 'offline' : state;
+                const fallbackMap = {
+                    idle: 'Idle',
+                    connecting: 'Connecting...',
+                    online: 'Online',
+                    offline: 'Offline',
+                };
+                capturePreviewStatus.dataset.i18n = `admin.preview.status.${statusKey}`;
+                capturePreviewStatus.textContent = translateOrDefault(
+                    `admin.preview.status.${statusKey}`,
+                    fallbackMap[statusKey] || ''
+                );
             }
             if (capturePreviewOverlay) {
-                if (message) {
-                    capturePreviewOverlay.textContent = message;
+                if (messageKey) {
+                    capturePreviewOverlay.dataset.i18n = messageKey;
+                    capturePreviewOverlay.textContent = t(messageKey);
                     capturePreviewOverlay.style.display = 'flex';
                 } else {
                     capturePreviewOverlay.style.display = 'none';
+                    delete capturePreviewOverlay.dataset.i18n;
                 }
             }
         }
@@ -429,7 +607,7 @@
             }
             previewActive = true;
             stopPreviewReconnectTimer();
-            setPreviewState('connecting', 'Connecting to camera...');
+            setPreviewState('connecting', 'admin.preview.connecting');
             capturePreviewFeed.src = `video_feed?raw=1&cache=${Date.now()}`;
         }
 
@@ -439,7 +617,7 @@
                 if (!previewActive) {
                     return;
                 }
-                setPreviewState('connecting', 'Reconnecting to camera...');
+                setPreviewState('connecting', 'admin.preview.reconnecting');
                 capturePreviewFeed.src = `video_feed?raw=1&cache=${Date.now()}`;
             }, 2000);
         }
@@ -468,7 +646,7 @@
             if (capturePreviewFeed) {
                 capturePreviewFeed.src = '';
             }
-            setPreviewState('idle', '');
+            setPreviewState('idle');
         }
 
         if (capturePreviewFeed) {
@@ -476,18 +654,18 @@
                 if (!previewActive) {
                     return;
                 }
-                setPreviewState('online', '');
+                setPreviewState('online');
             });
             capturePreviewFeed.addEventListener('error', () => {
                 if (!previewActive) {
                     return;
                 }
-                setPreviewState('error', 'Stream disconnected. Retrying...');
+                setPreviewState('error', 'admin.preview.disconnected');
                 schedulePreviewReconnect();
             });
         }
 
-        setPreviewState('idle', '');
+        setPreviewState('idle');
 
         async function fetchJSON(url, options) {
             const response = await fetch(url, options);
@@ -499,17 +677,41 @@
         }
 
         function formatDate(value) {
-            if (!value) return 'Never';
-            try {
-                return new Date(value).toLocaleString();
-            } catch {
-                return value;
+            return formatDisplayDate(value);
+        }
+
+        function updateSelectionMeta(student) {
+            if (!student) {
+                selectedStudentTitle.dataset.i18n = 'admin.selection.noneTitle';
+                delete selectedStudentTitle.dataset.i18nArgs;
+                selectedStudentTitle.textContent = t('admin.selection.noneTitle');
+
+                selectedStudentMeta.dataset.i18n = 'admin.selection.noneSubtitle';
+                delete selectedStudentMeta.dataset.i18nArgs;
+                selectedStudentMeta.textContent = t('admin.selection.noneSubtitle');
+
+                captureSampleButton.dataset.i18n = 'admin.capture.button';
+                captureSampleButton.textContent = t('admin.capture.button');
+                return;
             }
+
+            delete selectedStudentTitle.dataset.i18n;
+            delete selectedStudentTitle.dataset.i18nArgs;
+            selectedStudentTitle.textContent = student.name;
+
+            const lastSeenText = formatDate(student.last_seen_at);
+            const sampleCount = formatNumber(student.sample_count);
+            selectedStudentMeta.dataset.i18n = 'admin.selection.meta';
+            selectedStudentMeta.dataset.i18nArgs = JSON.stringify({ lastSeen: lastSeenText, count: sampleCount });
+            selectedStudentMeta.textContent = t('admin.selection.meta', { lastSeen: lastSeenText, count: sampleCount });
+
+            captureSampleButton.dataset.i18n = 'admin.capture.button';
+            captureSampleButton.textContent = t('admin.capture.button');
         }
 
         function renderStudentsTable() {
             if (!studentsCache.length) {
-                studentsTableBody.innerHTML = '<tr><td colspan="3" style="padding:1.2rem; text-align:center; color:#94a3b8;">No students yet.</td></tr>';
+                setStudentsTableMessage('admin.table.empty');
                 return;
             }
 
@@ -517,16 +719,56 @@
             studentsCache.forEach((student) => {
                 const row = document.createElement('tr');
                 row.dataset.id = String(student.id);
-                row.innerHTML = `
-                    <td style="text-align:left;">${student.name}</td>
-                    <td style="text-align:center;">${student.sample_count}</td>
-                    <td style="text-align:center; color:#94a3b8;">${formatDate(student.last_seen_at)}</td>
-                `;
+
+                const nameCell = document.createElement('td');
+                nameCell.style.textAlign = 'left';
+                nameCell.textContent = student.name;
+
+                const samplesCell = document.createElement('td');
+                samplesCell.style.textAlign = 'center';
+                samplesCell.textContent = formatNumber(student.sample_count);
+
+                const lastSeenCell = document.createElement('td');
+                lastSeenCell.style.textAlign = 'center';
+                lastSeenCell.style.color = '#94a3b8';
+                lastSeenCell.textContent = formatDate(student.last_seen_at);
+
+                const actionsCell = document.createElement('td');
+                actionsCell.style.textAlign = 'right';
+                const actionsWrapper = document.createElement('div');
+                actionsWrapper.className = 'table-actions';
+
+                const editButton = document.createElement('button');
+                editButton.type = 'button';
+                editButton.className = 'table-action-btn edit-student-btn';
+                editButton.dataset.i18n = 'admin.actions.edit';
+                editButton.textContent = t('admin.actions.edit');
+                editButton.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    editStudent(student.id, student.name);
+                });
+
+                const deleteButton = document.createElement('button');
+                deleteButton.type = 'button';
+                deleteButton.className = 'table-action-btn danger delete-student-btn';
+                deleteButton.dataset.i18n = 'admin.actions.remove';
+                deleteButton.textContent = t('admin.actions.remove');
+                deleteButton.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    deleteStudent(student.id, student.name);
+                });
+
+                actionsWrapper.append(editButton, deleteButton);
+                actionsCell.append(actionsWrapper);
+
+                row.append(nameCell, samplesCell, lastSeenCell, actionsCell);
+
                 if (student.id === selectedStudentId) {
                     row.classList.add('active');
                 }
+
                 row.addEventListener('click', () => selectStudent(student.id));
-                studentsTableBody.appendChild(row);
+                studentsTableBody.append(row);
             });
         }
 
@@ -534,22 +776,24 @@
             try {
                 const data = await fetchJSON('api/students');
                 if (!data.enabled) {
-                    studentsTableBody.innerHTML = '<tr><td colspan="3" style="padding:1.3rem; text-align:center; color:#f87171;">Attendance module is disabled in configuration.</td></tr>';
+                    setStudentsTableMessage('admin.table.disabled', {}, '#f87171');
                     return;
                 }
                 studentsCache = data.students || [];
-                checkInCountEl.textContent = data.attendance?.check_ins ?? 0;
-                checkOutCountEl.textContent = data.attendance?.check_outs ?? 0;
-                studentTotalCountEl.textContent = studentsCache.length;
+                checkInCountEl.textContent = formatNumber(data.attendance?.check_ins ?? 0);
+                checkOutCountEl.textContent = formatNumber(data.attendance?.check_outs ?? 0);
+                studentTotalCountEl.textContent = formatNumber(studentsCache.length);
                 renderStudentsTable();
                 if (selectedStudentId) {
-                    const exists = studentsCache.some((s) => s.id === selectedStudentId);
-                    if (!exists) {
+                    const selected = studentsCache.find((s) => s.id === selectedStudentId);
+                    if (selected) {
+                        updateSelectionMeta(selected);
+                    } else {
                         clearSelection();
                     }
                 }
             } catch (error) {
-                studentsTableBody.innerHTML = `<tr><td colspan="3" style="padding:1.2rem; text-align:center; color:#f87171;">Failed to load students: ${error.message}</td></tr>`;
+                setStudentsTableMessage('admin.table.error', { message: error.message }, '#f87171');
             }
         }
 
@@ -565,8 +809,7 @@
                 return;
             }
 
-            selectedStudentTitle.textContent = student.name;
-            selectedStudentMeta.textContent = `Last seen: ${formatDate(student.last_seen_at)} — Samples: ${student.sample_count}`;
+            updateSelectionMeta(student);
             captureSampleButton.disabled = false;
             showPreview();
 
@@ -576,26 +819,31 @@
             } catch (error) {
                 samplesContainer.innerHTML = '';
                 samplesEmptyState.style.display = 'block';
-                samplesEmptyState.textContent = `Unable to load samples: ${error.message}`;
+                samplesEmptyState.dataset.i18n = 'admin.samples.error';
+                samplesEmptyState.dataset.i18nArgs = JSON.stringify({ message: error.message });
+                samplesEmptyState.textContent = t('admin.samples.error', { message: error.message });
             }
         }
 
         function clearSelection() {
             selectedStudentId = null;
             captureSampleButton.disabled = true;
-            selectedStudentTitle.textContent = 'Select a student';
-            selectedStudentMeta.textContent = 'Capture samples to improve recognition accuracy.';
+            updateSelectionMeta(null);
             hidePreview();
             samplesContainer.innerHTML = '';
             samplesEmptyState.style.display = 'block';
-            samplesEmptyState.textContent = 'No samples yet. Capture one to get started.';
+            samplesEmptyState.dataset.i18n = 'admin.samples.empty';
+            delete samplesEmptyState.dataset.i18nArgs;
+            samplesEmptyState.textContent = t('admin.samples.empty');
         }
 
         function renderSamples(samples) {
             samplesContainer.innerHTML = '';
             if (!samples.length) {
                 samplesEmptyState.style.display = 'block';
-                samplesEmptyState.textContent = 'No samples yet. Capture one to get started.';
+                samplesEmptyState.dataset.i18n = 'admin.samples.empty';
+                delete samplesEmptyState.dataset.i18nArgs;
+                samplesEmptyState.textContent = t('admin.samples.empty');
                 return;
             }
             samplesEmptyState.style.display = 'none';
@@ -605,7 +853,7 @@
 
                 const img = document.createElement('img');
                 img.src = sample.image_url;
-                img.alt = `Sample captured ${formatDate(sample.created_at)}`;
+                img.alt = formatDate(sample.created_at);
                 card.appendChild(img);
 
                 const footer = document.createElement('footer');
@@ -616,7 +864,8 @@
                 const removeBtn = document.createElement('button');
                 removeBtn.className = 'remove-sample-btn';
                 removeBtn.type = 'button';
-                removeBtn.textContent = 'Remove';
+                removeBtn.dataset.i18n = 'admin.actions.remove';
+                removeBtn.textContent = t('admin.actions.remove');
                 removeBtn.addEventListener('click', () => removeSample(sample.id));
                 footer.appendChild(removeBtn);
 
@@ -630,25 +879,27 @@
                 return;
             }
             isCapturing = true;
-            captureSampleButton.textContent = 'Capturing...';
+            captureSampleButton.dataset.i18n = 'admin.capture.capturing';
+            captureSampleButton.textContent = t('admin.capture.capturing');
             captureSampleButton.disabled = true;
             try {
                 const data = await fetchJSON(`api/students/${selectedStudentId}/capture`, { method: 'POST' });
                 await loadStudents();
                 await selectStudent(selectedStudentId);
-                alert('Sample captured successfully.');
+                alert(t('admin.capture.success'));
             } catch (error) {
-                alert(`Capture failed: ${error.message}`);
+                alert(t('admin.capture.failed', { message: error.message }));
             } finally {
                 isCapturing = false;
-                captureSampleButton.textContent = 'Capture Sample';
+                captureSampleButton.dataset.i18n = 'admin.capture.button';
+                captureSampleButton.textContent = t('admin.capture.button');
                 captureSampleButton.disabled = !selectedStudentId;
             }
         }
 
         async function removeSample(sampleId) {
             if (!selectedStudentId) return;
-            const confirmDelete = window.confirm('Remove this sample image? This action cannot be undone.');
+            const confirmDelete = window.confirm(t('admin.samples.removeConfirm'));
             if (!confirmDelete) return;
             try {
                 await fetchJSON(`api/students/${selectedStudentId}/samples/${sampleId}`, { method: 'DELETE' });
@@ -657,7 +908,7 @@
                     await selectStudent(selectedStudentId);
                 }
             } catch (error) {
-                alert(`Unable to remove sample: ${error.message}`);
+                alert(t('admin.samples.removeFailed', { message: error.message }));
             }
         }
 
@@ -665,31 +916,46 @@
             try {
                 const data = await fetchJSON('api/attendance/logs?limit=100');
                 if (!data.enabled) {
-                    attendanceList.innerHTML = '<div class="empty-state">Attendance tracking is disabled.</div>';
-                    attendanceTotalBadge.textContent = '0 entries';
+                    updateAttendanceBadge(0);
+                    renderAttendanceMessage('admin.attendance.disabled');
                     return;
                 }
+
                 const records = data.records || [];
-                attendanceTotalBadge.textContent = `${records.length} entries`;
+                updateAttendanceBadge(records.length);
+
                 if (!records.length) {
-                    attendanceList.innerHTML = '<div class="empty-state">Logs will appear here once attendance is recorded.</div>';
+                    renderAttendanceMessage('admin.attendance.empty');
                     return;
                 }
+
                 attendanceList.innerHTML = '';
                 records.forEach((record) => {
                     const item = document.createElement('div');
                     item.className = 'attendance-item';
-                    item.innerHTML = `
-                        <div class="meta">
-                            <strong>${record.student_name}</strong>
-                            <span style="color:#94a3b8;">${new Date(record.timestamp).toLocaleString()}</span>
-                        </div>
-                        <span class="badge">${record.event_type.replace('_', ' ')}</span>
-                    `;
-                    attendanceList.appendChild(item);
+
+                    const meta = document.createElement('div');
+                    meta.className = 'meta';
+
+                    const nameEl = document.createElement('strong');
+                    nameEl.textContent = record.student_name || translateOrDefault('webcam.attendanceFeed.unknownStudent', 'Unknown student');
+
+                    const timeEl = document.createElement('span');
+                    timeEl.style.color = '#94a3b8';
+                    timeEl.textContent = formatDisplayDateTime(record.timestamp);
+
+                    meta.append(nameEl, timeEl);
+
+                    const badge = document.createElement('span');
+                    badge.className = 'badge';
+                    badge.textContent = formatAttendanceEventType(record.event_type);
+
+                    item.append(meta, badge);
+                    attendanceList.append(item);
                 });
             } catch (error) {
-                attendanceList.innerHTML = `<div class="empty-state">Unable to load attendance logs: ${error.message}</div>`;
+                updateAttendanceBadge(0);
+                renderAttendanceMessage('admin.attendance.error', { message: error.message });
             }
         }
 
@@ -706,11 +972,65 @@
                 studentNameInput.value = '';
                 await loadStudents();
             } catch (error) {
-                alert(`Unable to add student: ${error.message}`);
+                alert(t('admin.addForm.error', { message: error.message }));
             }
         });
 
+        async function editStudent(studentId, currentName) {
+            const promptLabel = t('admin.edit.prompt');
+            const newName = window.prompt(promptLabel, currentName || '');
+            if (newName === null) {
+                return;
+            }
+            const trimmed = newName.trim();
+            if (!trimmed) {
+                alert(t('admin.edit.empty'));
+                return;
+            }
+            if (trimmed === currentName) {
+                return;
+            }
+            try {
+                await fetchJSON(`api/students/${studentId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: trimmed }),
+                });
+                await loadStudents();
+                if (selectedStudentId === studentId) {
+                    await selectStudent(studentId);
+                }
+            } catch (error) {
+                alert(t('admin.edit.error', { message: error.message }));
+            }
+        }
+
+        async function deleteStudent(studentId, studentName) {
+            const confirmation = window.confirm(t('admin.delete.confirm', { name: studentName }));
+            if (!confirmation) {
+                return;
+            }
+            try {
+                await fetchJSON(`api/students/${studentId}`, { method: 'DELETE' });
+                if (selectedStudentId === studentId) {
+                    clearSelection();
+                }
+                await loadStudents();
+            } catch (error) {
+                alert(t('admin.delete.failed', { message: error.message }));
+            }
+        }
+
         captureSampleButton.addEventListener('click', captureSample);
+
+        if (typeof I18N_API.onChange === 'function') {
+            I18N_API.onChange(() => {
+                const student = selectedStudentId ? studentsCache.find((s) => s.id === selectedStudentId) : null;
+                updateSelectionMeta(student || null);
+                loadStudents();
+                loadAttendance();
+            });
+        }
 
         document.addEventListener('DOMContentLoaded', async () => {
             await loadStudents();

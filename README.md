@@ -20,6 +20,19 @@ camera feed.
   `/api/attendance/logs` back the admin UI and can be integrated with external
   systems if needed.
 
+### How It Works
+
+1. A single camera feed is processed by YOLOv8 to spot students and detect
+   whether the required red scarf is present.
+2. In parallel, face crops from the same frame are passed to an LBPH-based
+   recogniser that matches them against stored student samples.
+3. The web dashboard overlays each detection with both scarf status and
+   recognised student identity, then:
+   - saves any scarf violation frames and registers them under the `violations`
+     table;
+   - alternates between check-in and check-out attendance events per recognised
+     student, enforcing configured cooldowns to avoid duplicate entries.
+
 ### Running the Monitor
 
 1. Install dependencies:

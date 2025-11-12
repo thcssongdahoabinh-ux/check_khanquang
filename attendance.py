@@ -8,6 +8,7 @@ logging, and in-memory face recognition via OpenCV's LBPH classifier.
 from __future__ import annotations
 
 import datetime as dt
+import shutil
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -126,6 +127,28 @@ class AttendanceStore:
 
         return Student(id=int(student_id), name=sanitized, created_at=dt.datetime.fromisoformat(now), last_seen_at=None, sample_count=0)
 
+    def update_student(self, student_id: int, name: str) -> Student:
+        sanitized = " ".join(part for part in str(name).strip().split() if part)
+        if not sanitized:
+            raise ValueError("Student name must not be empty")
+
+        try:
+            with sqlite3.connect(self._db_path) as conn:
+                cursor = conn.execute(
+                    "UPDATE students SET name = ? WHERE id = ?",
+                    (sanitized, student_id),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("Student name already exists") from exc
+
+        if cursor.rowcount == 0:
+            raise LookupError("Student not found")
+
+        updated = self.get_student(student_id)
+        if updated is None:
+            raise LookupError("Student not found")
+        return updated
+
     def list_students(self) -> List[Student]:
         with sqlite3.connect(self._db_path) as conn:
             rows = conn.execute(
@@ -171,9 +194,27 @@ class AttendanceStore:
         last_seen = dt.datetime.fromisoformat(row[3]) if row[3] else None
         return Student(id=int(row[0]), name=str(row[1]), created_at=created, last_seen_at=last_seen, sample_count=int(row[4] or 0))
 
-    def delete_student(self, student_id: int) -> None:
+    def delete_student(self, student_id: int) -> bool:
+        sample_paths = [path for _, path in self.iter_sample_paths(student_id)]
         with sqlite3.connect(self._db_path) as conn:
-            conn.execute("DELETE FROM students WHERE id = ?", (student_id,))
+            cursor = conn.execute("DELETE FROM students WHERE id = ?", (student_id,))
+
+        if cursor.rowcount == 0:
+            return False
+
+        for path in sample_paths:
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError:
+                pass
+
+        student_dir = self._samples_dir / f"student_{student_id:04d}"
+        try:
+            shutil.rmtree(student_dir, ignore_errors=True)
+        except OSError:
+            pass
+        return True
 
     # ---------------------------------------------------------------- samples
 

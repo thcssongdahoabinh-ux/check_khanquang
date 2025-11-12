@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Admin Login</title>
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: "Inter", Arial, sans-serif;
+            background: radial-gradient(circle at top, #1e293b, #0b1120 60%);
+            color: #e2e8f0;
+        }
+        main {
+            width: min(420px, 92vw);
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-radius: 20px;
+            padding: 2.5rem 2.2rem 2rem;
+            box-shadow: 0 32px 60px rgba(15, 23, 42, 0.6);
+            display: flex;
+            flex-direction: column;
+            gap: 1.6rem;
+        }
+        h1 {
+            margin: 0;
+            text-align: center;
+            font-size: 1.75rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        p {
+            margin: 0;
+            color: #94a3b8;
+            text-align: center;
+            line-height: 1.5;
+        }
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 1.2rem;
+        }
+        label {
+            font-size: 0.95rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #cbd5f5;
+        }
+        input[type="password"] {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border-radius: 12px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            background: rgba(15, 23, 42, 0.75);
+            color: inherit;
+            font-size: 1rem;
+        }
+        input[type="password"]::placeholder {
+            color: #64748b;
+        }
+        button {
+            padding: 0.75rem 1rem;
+            border-radius: 999px;
+            border: none;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            color: #0f172a;
+            background: linear-gradient(135deg, #38bdf8, #6366f1);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 16px 30px rgba(99, 102, 241, 0.35);
+        }
+        .links {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            font-size: 0.9rem;
+        }
+        a {
+            color: #60a5fa;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .error {
+            display: none;
+            padding: 0.75rem 1rem;
+            border-radius: 12px;
+            background: rgba(248, 113, 113, 0.16);
+            color: #fecaca;
+            font-size: 0.9rem;
+            text-align: center;
+            letter-spacing: 0.03em;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <section>
+            <h1>Admin Access</h1>
+            <p>Enter the administrator password to continue to the attendance management console.</p>
+        </section>
+        <div id="errorBox" class="error">Invalid password. Please try again.</div>
+        <form method="post" autocomplete="off">
+            <div>
+                <label for="passwordInput">Password</label>
+                <input id="passwordInput" type="password" name="password" placeholder="Enter password" required autofocus>
+            </div>
+            <button type="submit">Sign In</button>
+        </form>
+        <div class="links">
+            <a href="webcam.html">Back to Monitor</a>
+            <a href="attendance_report.html">Attendance Report</a>
+        </div>
+    </main>
+    <script>
+        (function () {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('error')) {
+                const box = document.getElementById('errorBox');
+                if (box) {
+                    box.style.display = 'block';
+                }
+            }
+            const next = params.get('next');
+            if (next) {
+                const form = document.querySelector('form');
+                const hidden = document.createElement('input');
+                hidden.type = 'hidden';
+                hidden.name = 'next';
+                hidden.value = next;
+                form.append(hidden);
+            }
+        })();
+    </script>
+</body>
+</html>
+

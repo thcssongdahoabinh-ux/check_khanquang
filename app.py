@@ -33,7 +33,7 @@ from ultralytics import YOLO
 
 import yaml
 
-from flask import Flask, Response, abort, jsonify, redirect, request, send_from_directory
+from flask import Flask, Response, abort, jsonify, redirect, request, send_from_directory, session, url_for
 
 from attendance import AttendanceRecord, AttendanceStore, RecognitionResult, Student, StudentRecognizer
 
@@ -102,6 +102,8 @@ _CONFIG_PATH: Optional[Path] = None
 _FACE_LOCK = threading.Lock()
 _CAPTURE_LOCK = threading.Lock()
 _CAPTURE_ACTIVE = True
+_SOUND_LOCK = threading.Lock()
+_SOUND_ENABLED = True
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +137,7 @@ class Settings:
     attendance_cooldown_seconds: float
     recognition_min_samples: int
     face_distance_threshold: float
+    admin_password: str
 
 
 _CONFIG_FIELD_TYPES: Dict[str, type] = {
@@ -184,7 +187,10 @@ def load_settings(config_path: Path) -> Settings:
         return target
 
     alarm_file = data.get("alarm_file")
-    alarm_path = resolve_path(alarm_file, "config/alarm.mp3") if alarm_file else None
+    if isinstance(alarm_file, str) and not alarm_file.strip():
+        alarm_path = None
+    else:
+        alarm_path = resolve_path(alarm_file, "assets/no_scarf.mp3")
 
     return Settings(
         model_path=resolve_path(data.get("model_path"), "model/best.pt"),
@@ -211,6 +217,7 @@ def load_settings(config_path: Path) -> Settings:
         attendance_cooldown_seconds=float(data.get("attendance_cooldown_seconds", 45)),
         recognition_min_samples=int(data.get("recognition_min_samples", 1)),
         face_distance_threshold=float(data.get("face_distance_threshold", 70.0)),
+        admin_password=str(data.get("admin_password", "changeme123")),
     )
 
 
@@ -303,6 +310,11 @@ def _public_config_view() -> Dict[str, Any]:
         if key in config:
             view[key] = config[key]
     return view
+
+
+def _require_admin_api() -> None:
+    if not session.get("admin_authenticated"):
+        abort(401, description="Admin authentication required")
 
 
 # ---------------------------------------------------------------------------
@@ -405,7 +417,7 @@ class AlertManager:
         self._voice_lock = threading.Lock()
 
     def sound(self) -> None:
-        if not self._settings.enable_sound_alert or playsound is None:
+        if not _get_sound_enabled() or playsound is None:
             return
         alarm = self._settings.alarm_file
         if alarm is None or not alarm.exists():
@@ -848,6 +860,7 @@ def run_monitor(
     _STUDENT_RECOGNIZER = recognizer
     _ATTENDANCE_MANAGER = attendance_manager
     _set_capture_active(settings.save_violation_images)
+    _set_sound_enabled(settings.enable_sound_alert)
 
     cap = cv2.VideoCapture(settings.camera_index)
     if not cap.isOpened():
@@ -975,9 +988,12 @@ def run_monitor(
                 scarf_count += 1
             else:
                 violations += 1
-                if settings.save_violation_images and capture_active and track_id >= 0 and cooldown.ready(track_id):
+                violation_ready = track_id >= 0 and cooldown.ready(track_id)
+                if violation_ready:
                     cooldown.mark(track_id)
-                    snapshot_path = save_snapshot(settings, frame, track_id)
+                    snapshot_path: Optional[Path] = None
+                    if settings.save_violation_images and capture_active:
+                        snapshot_path = save_snapshot(settings, frame, track_id)
                     store.log(track_id, confidence, snapshot_path)
                     alerts.sound()
                     alerts.voice("Warning, student without red scarf")
@@ -1110,6 +1126,18 @@ def _get_capture_active() -> bool:
         return _CAPTURE_ACTIVE
 
 
+def _set_sound_enabled(enabled: bool) -> bool:
+    global _SOUND_ENABLED
+    with _SOUND_LOCK:
+        _SOUND_ENABLED = bool(enabled)
+        return _SOUND_ENABLED
+
+
+def _get_sound_enabled() -> bool:
+    with _SOUND_LOCK:
+        return _SOUND_ENABLED
+
+
 def _generate_mjpeg_frames(*, raw: bool = False) -> Iterable[bytes]:
     jpeg_params = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
     while True:
@@ -1148,6 +1176,9 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
     monitor_thread.start()
 
     app = Flask(__name__, static_folder=str(Path(__file__).parent), static_url_path="")
+    app.secret_key = settings.admin_password or "changeme123"
+    app.config["SESSION_COOKIE_NAME"] = "admin_session"
+    app.permanent_session_lifetime = dt.timedelta(hours=8)
 
     @app.route("/")
     def root() -> Response:
@@ -1163,11 +1194,47 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
 
     @app.route("/settings.html")
     def settings_page() -> Response:
+        if not session.get("admin_authenticated"):
+            return redirect(url_for("admin_login", next=request.path))
         return send_from_directory(app.static_folder, "settings.html")
 
     @app.route("/admin.html")
     def admin_page() -> Response:
+        if not session.get("admin_authenticated"):
+            return redirect(url_for("admin_login", next=request.path))
         return send_from_directory(app.static_folder, "admin.html")
+
+    @app.route("/admin-login", methods=["GET", "POST"])
+    def admin_login() -> Response:
+        if session.get("admin_authenticated"):
+            return redirect(url_for("admin_page"))
+
+        if request.method == "POST":
+            password = ""
+            if request.is_json:
+                payload = request.get_json(silent=True) or {}
+                password = str(payload.get("password", ""))
+            else:
+                password = str(request.form.get("password", ""))
+
+            if password == settings.admin_password:
+                session["admin_authenticated"] = True
+                next_url = request.args.get("next") or request.form.get("next")
+                if next_url and next_url.startswith("/"):
+                    return redirect(next_url)
+                return redirect(url_for("admin_page"))
+            next_param = request.args.get("next") or request.form.get("next")
+            params = {"error": "1"}
+            if next_param and next_param.startswith("/"):
+                params["next"] = next_param
+            return redirect(url_for("admin_login", **params))
+
+        return send_from_directory(app.static_folder, "admin_login.html")
+
+    @app.route("/admin-logout")
+    def admin_logout() -> Response:
+        session.pop("admin_authenticated", None)
+        return redirect(url_for("admin_login"))
 
     @app.route("/video_feed")
     def video_feed() -> Response:
@@ -1184,6 +1251,7 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
             payload = dict(_LATEST_STATS)
         payload.setdefault("timestamp", dt.datetime.now(dt.timezone.utc).isoformat())
         payload["capture_active"] = _get_capture_active()
+        payload["sound_enabled"] = _get_sound_enabled()
         return jsonify(payload)
 
     @app.route("/api/violations")
@@ -1256,6 +1324,7 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
 
     @app.route("/api/settings", methods=["GET", "POST"])
     def api_settings() -> Response:
+        _require_admin_api()
         try:
             view = _public_config_view()
         except Exception as exc:  # pragma: no cover - defensive
@@ -1300,6 +1369,35 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
 
         actual = _set_capture_active(enabled)
         return jsonify({"enabled": actual, "allowed": True})
+
+    @app.route("/api/sound", methods=["GET", "POST"])
+    def api_sound_toggle() -> Response:
+        settings = _GLOBAL_SETTINGS
+        if request.method == "GET":
+            return jsonify(
+                {
+                    "enabled": _get_sound_enabled(),
+                    "default": settings.enable_sound_alert if settings is not None else None,
+                    "supported": playsound is not None,
+                }
+            )
+
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or "enabled" not in payload:
+            abort(400, description="Expected JSON object with 'enabled' field")
+
+        enabled = payload["enabled"]
+        if isinstance(enabled, bool):
+            new_state = _set_sound_enabled(enabled)
+        elif isinstance(enabled, (int, float)):
+            new_state = _set_sound_enabled(bool(enabled))
+        else:
+            abort(400, description="'enabled' must be a boolean")
+
+        if settings is not None:
+            settings.enable_sound_alert = new_state
+
+        return jsonify({"enabled": new_state})
 
     @app.route("/api/students", methods=["GET", "POST"])
     def api_students() -> Response:
@@ -1350,6 +1448,51 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
             ),
             201,
         )
+
+    @app.route("/api/students/<int:student_id>", methods=["PATCH", "DELETE"])
+    def api_student_detail(student_id: int) -> Response:
+        if _ATTENDANCE_STORE is None:
+            abort(503, description="Attendance module is disabled")
+
+        store = _ATTENDANCE_STORE
+
+        if request.method == "PATCH":
+            payload = request.get_json(silent=True) or {}
+            if "name" not in payload:
+                abort(400, description="Field 'name' is required")
+            try:
+                student = store.update_student(student_id, payload["name"])
+            except LookupError:
+                abort(404, description="Student not found")
+            except ValueError as exc:
+                message = str(exc)
+                status = 409 if "exists" in message.lower() else 400
+                abort(status, description=message)
+
+            if _STUDENT_RECOGNIZER is not None:
+                _STUDENT_RECOGNIZER.rebuild()
+
+            return jsonify(
+                {
+                    "student": {
+                        "id": student.id,
+                        "name": student.name,
+                        "created_at": student.created_at.isoformat(),
+                        "last_seen_at": student.last_seen_at.isoformat() if student.last_seen_at else None,
+                        "sample_count": student.sample_count,
+                    }
+                }
+            )
+
+        # DELETE
+        deleted = store.delete_student(student_id)
+        if not deleted:
+            abort(404, description="Student not found")
+
+        if _STUDENT_RECOGNIZER is not None:
+            _STUDENT_RECOGNIZER.rebuild()
+
+        return jsonify({"deleted": True, "student_id": student_id})
 
     @app.route("/api/students/<int:student_id>/samples", methods=["GET"])
     def api_student_samples(student_id: int) -> Response:

@@ -10,8 +10,11 @@ const I18N = (() => {
                 english: 'English',
                 vietnamese: 'Vietnamese',
                 backToDashboard: 'Back to Dashboard',
+                backToMonitor: 'Back to Monitor',
+                backToAdmin: 'Back to Admin',
                 settings: 'Settings',
                 admin: 'Admin',
+                attendanceReport: 'Attendance Report',
                 selectLanguage: 'Select language',
                 all: 'All',
                 reload: 'Reload Stream',
@@ -23,7 +26,12 @@ const I18N = (() => {
                 reset: 'Reset',
                 saveChanges: 'Save Changes',
                 snapshotUnavailable: 'Snapshot unavailable',
-                requestFailed: 'Request failed'
+                requestFailed: 'Request failed',
+                export: 'Export',
+                refresh: 'Refresh',
+                edit: 'Edit',
+                remove: 'Remove',
+                logout: 'Logout'
             },
             months: [
                 'January', 'February', 'March', 'April', 'May', 'June',
@@ -70,6 +78,86 @@ const I18N = (() => {
                 error: {
                     unableToFetch: 'Unable to fetch settings',
                     saveFailed: 'Save failed'
+                }
+            },
+            admin: {
+                pageTitle: 'Attendance Admin',
+                heading: 'Attendance Admin',
+                subtitle: 'Manage student identities and attendance logs',
+                addForm: {
+                    placeholder: 'Student name',
+                submit: 'Add Student',
+                error: 'Unable to add student: {{message}}'
+                },
+                stats: {
+                    checkIns: 'Check-ins',
+                    checkOuts: 'Check-outs',
+                    totalStudents: 'Total Students'
+                },
+                table: {
+                    heading: 'Students',
+                    columns: {
+                        name: 'Name',
+                        samples: 'Samples',
+                        lastSeen: 'Last Seen',
+                        actions: 'Actions'
+                    },
+                    loading: 'Loading...',
+                    empty: 'No students yet.',
+                    disabled: 'Attendance module is disabled in configuration.',
+                    error: 'Failed to load students: {{message}}'
+                },
+                selection: {
+                    noneTitle: 'Select a student',
+                    noneSubtitle: 'Capture samples to improve recognition accuracy.',
+                    meta: 'Last seen: {{lastSeen}} — Samples: {{count}}',
+                    never: 'Never'
+                },
+                actions: {
+                    edit: 'Edit',
+                    remove: 'Remove',
+                    capture: 'Capture Sample'
+                },
+                preview: {
+                    title: 'Live Capture Preview',
+                    status: {
+                        idle: 'Idle',
+                        connecting: 'Connecting...',
+                        online: 'Online',
+                        offline: 'Offline'
+                    },
+                    connecting: 'Connecting to camera...',
+                    reconnecting: 'Reconnecting to camera...',
+                    disconnected: 'Stream disconnected. Retrying...'
+                },
+                samples: {
+                    heading: 'Samples',
+                    empty: 'No samples yet. Capture one to get started.',
+                    error: 'Unable to load samples: {{message}}',
+                    removeConfirm: 'Remove this sample image? This action cannot be undone.',
+                    removeFailed: 'Unable to remove sample: {{message}}'
+                },
+                capture: {
+                    button: 'Capture Sample',
+                    capturing: 'Capturing...',
+                    success: 'Sample captured successfully.',
+                    failed: 'Capture failed: {{message}}'
+                },
+                edit: {
+                    prompt: 'Enter a new name for this student:',
+                empty: 'Student name must not be empty.',
+                error: 'Unable to update student: {{message}}'
+                },
+                delete: {
+                    confirm: 'Remove student "{{name}}"? This will also delete all of their samples and attendance records.',
+                    failed: 'Unable to remove student: {{message}}'
+                },
+                attendance: {
+                    heading: 'Attendance Logs',
+                    badge: '{{count}} entries',
+                    empty: 'Logs will appear here once attendance is recorded.',
+                    disabled: 'Attendance tracking is disabled.',
+                    error: 'Unable to load attendance logs: {{message}}'
                 }
             },
             webcam: {
@@ -186,29 +274,67 @@ const I18N = (() => {
                 pagination: {
                     info: 'Page {{page}} of {{totalPages}} | {{total}} total'
                 }
+            },
+            attendanceReport: {
+                pageTitle: 'Attendance Report',
+                heading: 'Attendance Report',
+                subtitle: 'Review daily check-in and check-out activity per student.',
+                backToAdmin: 'Back to Admin',
+                backToMonitor: 'Back to Monitor',
+                export: 'Export Report',
+                filters: {
+                    year: 'Year',
+                    month: 'Month',
+                    day: 'Day'
+                },
+                status: {
+                    default: 'Showing latest attendance records.',
+                    filters: 'Filters applied: {{filters}}',
+                    disabled: 'Attendance tracking is currently disabled.',
+                    loading: 'Loading...',
+                    empty: 'No attendance recorded for the selected filters.',
+                    error: 'Unable to load report: {{message}}'
+                },
+                table: {
+                    number: 'No.',
+                    student: 'Student',
+                    firstCheckIn: 'First Check In',
+                    lastCheckOut: 'Last Check Out'
+                },
+                records: {
+                    count: '{{count}} students'
+                }
             }
         },
         vi: {
-            common: {
-                language: 'Ngôn ngữ',
-                english: 'Tiếng Anh',
-                vietnamese: 'Tiếng Việt',
-                backToDashboard: 'Quay lại Bảng điều khiển',
-                settings: 'Cài đặt',
-                admin: 'Quản trị',
-                selectLanguage: 'Chọn ngôn ngữ',
-                all: 'Tất cả',
-                reload: 'Tải lại luồng',
-                viewAll: 'Xem tất cả',
-                previous: 'Trước',
-                next: 'Tiếp',
-                loading: 'Đang tải...',
-                itemsPerPage: 'Số mục mỗi trang',
-                reset: 'Đặt lại',
-                saveChanges: 'Lưu thay đổi',
-                snapshotUnavailable: 'Không có ảnh chụp',
-                requestFailed: 'Yêu cầu thất bại'
-            },
+        common: {
+            language: 'Ngôn ngữ',
+            english: 'Tiếng Anh',
+            vietnamese: 'Tiếng Việt',
+            backToDashboard: 'Quay lại Bảng điều khiển',
+            backToMonitor: 'Quay lại màn hình giám sát',
+            backToAdmin: 'Quay lại trang quản trị',
+            settings: 'Cài đặt',
+            admin: 'Quản trị',
+            attendanceReport: 'Báo cáo điểm danh',
+            selectLanguage: 'Chọn ngôn ngữ',
+            all: 'Tất cả',
+            reload: 'Tải lại luồng',
+            viewAll: 'Xem tất cả',
+            previous: 'Trước',
+            next: 'Tiếp',
+            loading: 'Đang tải...',
+            itemsPerPage: 'Số mục mỗi trang',
+            reset: 'Đặt lại',
+            saveChanges: 'Lưu thay đổi',
+            snapshotUnavailable: 'Không có ảnh chụp',
+            requestFailed: 'Yêu cầu thất bại',
+            export: 'Xuất báo cáo',
+            refresh: 'Làm mới',
+            edit: 'Sửa',
+            remove: 'Xóa',
+            logout: 'Đăng xuất'
+        },
             months: [
                 'Tháng 1', 'Tháng 2', 'Tháng 3', 'Tháng 4', 'Tháng 5', 'Tháng 6',
                 'Tháng 7', 'Tháng 8', 'Tháng 9', 'Tháng 10', 'Tháng 11', 'Tháng 12'
@@ -256,6 +382,86 @@ const I18N = (() => {
                     saveFailed: 'Lưu thất bại'
                 }
             },
+        admin: {
+            pageTitle: 'Quản trị điểm danh',
+            heading: 'Quản trị điểm danh',
+            subtitle: 'Quản lý danh tính học sinh và nhật ký điểm danh',
+            addForm: {
+                placeholder: 'Tên học sinh',
+            submit: 'Thêm học sinh',
+            error: 'Không thể thêm học sinh: {{message}}'
+            },
+            stats: {
+                checkIns: 'Điểm danh vào',
+                checkOuts: 'Điểm danh ra',
+                totalStudents: 'Tổng số học sinh'
+            },
+            table: {
+                heading: 'Danh sách học sinh',
+                columns: {
+                    name: 'Họ tên',
+                    samples: 'Số mẫu',
+                    lastSeen: 'Lần cuối',
+                    actions: 'Thao tác'
+                },
+                loading: 'Đang tải...',
+                empty: 'Chưa có học sinh nào.',
+                disabled: 'Chức năng điểm danh đang tắt trong cấu hình.',
+                error: 'Không thể tải danh sách học sinh: {{message}}'
+            },
+            selection: {
+                noneTitle: 'Chọn một học sinh',
+                noneSubtitle: 'Chụp thêm mẫu để cải thiện độ chính xác nhận diện.',
+                meta: 'Lần cuối: {{lastSeen}} — Số mẫu: {{count}}',
+                never: 'Chưa từng'
+            },
+            actions: {
+                edit: 'Sửa',
+                remove: 'Xóa',
+                capture: 'Chụp mẫu'
+            },
+            preview: {
+                title: 'Xem trước việc chụp',
+                status: {
+                    idle: 'Chờ',
+                    connecting: 'Đang kết nối...',
+                    online: 'Đang hoạt động',
+                    offline: 'Mất kết nối'
+                },
+                connecting: 'Đang kết nối tới camera...',
+                reconnecting: 'Đang kết nối lại camera...',
+                disconnected: 'Luồng camera bị ngắt. Đang thử lại...'
+            },
+            samples: {
+                heading: 'Mẫu khuôn mặt',
+                empty: 'Chưa có mẫu nào. Hãy chụp mẫu để bắt đầu.',
+                error: 'Không thể tải danh sách mẫu: {{message}}',
+                removeConfirm: 'Xóa ảnh mẫu này? Hành động không thể hoàn tác.',
+                removeFailed: 'Không thể xóa mẫu: {{message}}'
+            },
+            capture: {
+                button: 'Chụp mẫu',
+                capturing: 'Đang chụp...',
+                success: 'Đã chụp mẫu thành công.',
+                failed: 'Chụp mẫu thất bại: {{message}}'
+            },
+            edit: {
+                prompt: 'Nhập tên mới cho học sinh này:',
+            empty: 'Tên học sinh không được để trống.',
+            error: 'Không thể cập nhật học sinh: {{message}}'
+            },
+            delete: {
+                confirm: 'Xóa học sinh "{{name}}"? Thao tác này cũng xóa toàn bộ mẫu và lịch sử điểm danh.',
+                failed: 'Không thể xóa học sinh: {{message}}'
+            },
+            attendance: {
+                heading: 'Nhật ký điểm danh',
+                badge: '{{count}} bản ghi',
+                empty: 'Nhật ký sẽ hiển thị khi có dữ liệu điểm danh.',
+                disabled: 'Chức năng điểm danh đang tắt.',
+                error: 'Không thể tải nhật ký điểm danh: {{message}}'
+            }
+        },
             webcam: {
                 pageTitle: 'Giám sát học sinh',
                 heading: 'Giám sát học sinh',
@@ -370,6 +576,36 @@ const I18N = (() => {
                 pagination: {
                     info: 'Trang {{page}} / {{totalPages}} | Tổng {{total}}'
                 }
+        },
+        attendanceReport: {
+            pageTitle: 'Báo cáo điểm danh',
+            heading: 'Báo cáo điểm danh',
+            subtitle: 'Xem lại hoạt động điểm danh vào/ra của từng học sinh theo ngày.',
+            backToAdmin: 'Quay lại trang quản trị',
+            backToMonitor: 'Quay lại màn hình giám sát',
+            export: 'Xuất báo cáo',
+            filters: {
+                year: 'Năm',
+                month: 'Tháng',
+                day: 'Ngày'
+            },
+            status: {
+                default: 'Hiển thị các bản ghi điểm danh mới nhất.',
+                filters: 'Đang áp dụng bộ lọc: {{filters}}',
+                disabled: 'Chức năng điểm danh đang tắt.',
+                loading: 'Đang tải...',
+                empty: 'Không có dữ liệu điểm danh cho bộ lọc đã chọn.',
+                error: 'Không thể tải báo cáo: {{message}}'
+            },
+            table: {
+                number: 'STT',
+                student: 'Học sinh',
+                firstCheckIn: 'Điểm danh vào đầu tiên',
+                lastCheckOut: 'Điểm danh ra cuối cùng'
+            },
+            records: {
+                count: '{{count}} học sinh'
+            }
             }
         }
     };

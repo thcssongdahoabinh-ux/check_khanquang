@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="utf-8">
-    <title>Attendance Report</title>
+    <title data-i18n="attendanceReport.pageTitle">Attendance Report</title>
     <style>
         :root {
             color-scheme: dark;
@@ -26,6 +26,12 @@
             justify-content: space-between;
             align-items: center;
             gap: 1rem;
+        }
+        .header-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
         }
         h1 {
             margin: 0;
@@ -144,68 +150,104 @@
             color: #cbd5f5;
             font-weight: 600;
         }
+        .language-select {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.4rem 0.8rem;
+            border-radius: 999px;
+            background: rgba(148, 163, 184, 0.15);
+            color: #cbd5f5;
+            font-size: 0.85rem;
+        }
+        .language-select span {
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .language-select select {
+            appearance: none;
+            background: transparent;
+            border: none;
+            color: #f8fafc;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            padding: 0;
+            min-width: 90px;
+        }
+        .language-select select:focus {
+            outline: none;
+        }
     </style>
 </head>
 <body>
     <main>
         <header>
             <div>
-                <h1>Attendance Report</h1>
-                <p class="subtitle">Review daily check-in and check-out activity per student.</p>
+                <h1 data-i18n="attendanceReport.heading">Attendance Report</h1>
+                <p class="subtitle" data-i18n="attendanceReport.subtitle">Review daily check-in and check-out activity per student.</p>
             </div>
             <div class="header-actions">
-                <a class="button" href="admin.html">Back to Admin</a>
-                <a class="button" href="webcam.html">Back to Monitor</a>
-                <button id="exportButton" type="button">Export Report</button>
+                <div class="language-select">
+                    <span data-i18n="common.language">Language</span>
+                    <select id="languageSelect" data-i18n-aria-label="common.selectLanguage">
+                        <option value="en" data-i18n="common.english">English</option>
+                        <option value="vi" data-i18n="common.vietnamese">Tiếng Việt</option>
+                    </select>
+                </div>
+                <a class="button" href="admin.html" data-i18n="common.backToAdmin">Back to Admin</a>
+                <a class="button" href="webcam.html" data-i18n="common.backToMonitor">Back to Monitor</a>
+                <button id="exportButton" type="button" data-i18n="attendanceReport.export">Export Report</button>
             </div>
         </header>
 
         <section class="card">
             <form class="filters" id="filtersForm" onsubmit="return false;">
                 <label>
-                    Year
+                    <span data-i18n="attendanceReport.filters.year">Year</span>
                     <select id="yearFilter">
-                        <option value="all">All</option>
+                        <option value="all" data-i18n="common.all">All</option>
                     </select>
                 </label>
                 <label>
-                    Month
+                    <span data-i18n="attendanceReport.filters.month">Month</span>
                     <select id="monthFilter" disabled>
-                        <option value="all">All</option>
+                        <option value="all" data-i18n="common.all">All</option>
                     </select>
                 </label>
                 <label>
-                    Day
+                    <span data-i18n="attendanceReport.filters.day">Day</span>
                     <select id="dayFilter" disabled>
-                        <option value="all">All</option>
+                        <option value="all" data-i18n="common.all">All</option>
                     </select>
                 </label>
-                <button id="refreshButton" type="button">Refresh</button>
+                <button id="refreshButton" type="button" data-i18n="common.refresh">Refresh</button>
             </form>
 
             <div class="status-bar">
-                <span id="reportStatus">Showing latest attendance records.</span>
+                <span id="reportStatus" data-i18n="attendanceReport.status.default">Showing latest attendance records.</span>
                 <span id="recordCount" class="status-highlight"></span>
             </div>
 
             <table>
                 <thead>
                     <tr>
-                        <th style="width:70px;">No.</th>
-                        <th>Student</th>
-                        <th style="width:210px;">First Check In</th>
-                        <th style="width:210px;">Last Check Out</th>
+                        <th style="width:70px;" data-i18n="attendanceReport.table.number">No.</th>
+                        <th data-i18n="attendanceReport.table.student">Student</th>
+                        <th style="width:210px;" data-i18n="attendanceReport.table.firstCheckIn">First Check In</th>
+                        <th style="width:210px;" data-i18n="attendanceReport.table.lastCheckOut">Last Check Out</th>
                     </tr>
                 </thead>
                 <tbody id="reportTableBody">
                     <tr>
-                        <td colspan="4" class="empty-row">Loading...</td>
+                        <td colspan="4" class="empty-row" data-i18n="attendanceReport.status.loading">Loading...</td>
                     </tr>
                 </tbody>
             </table>
         </section>
     </main>
 
+    <script src="i18n.js"></script>
     <script>
         const yearFilter = document.getElementById('yearFilter');
         const monthFilter = document.getElementById('monthFilter');
@@ -216,56 +258,93 @@
         const reportStatus = document.getElementById('reportStatus');
         const recordCount = document.getElementById('recordCount');
 
-        function buildParams() {
-            const params = new URLSearchParams();
-            if (yearFilter.value !== 'all') params.set('year', yearFilter.value);
-            if (monthFilter.value !== 'all') params.set('month', monthFilter.value);
-            if (dayFilter.value !== 'all') params.set('day', dayFilter.value);
-            return params;
-        }
+        const I18N_API = window.I18N || {};
+        const t = (key, replacements) => (typeof I18N_API.t === 'function' ? I18N_API.t(key, replacements) : key);
+        const formatNumber = (value) => (
+            typeof I18N_API.formatNumber === 'function'
+                ? I18N_API.formatNumber(value)
+                : new Intl.NumberFormat().format(value ?? 0)
+        );
 
-        function populateSelect(selectEl, values, retainValue = true) {
-            const previous = retainValue ? selectEl.value : 'all';
-            selectEl.innerHTML = '<option value="all">All</option>';
+        const state = {
+            year: 'all',
+            month: 'all',
+            day: 'all',
+        };
+
+        function populateSelect(selectEl, values) {
+            const previous = selectEl.value || 'all';
+            selectEl.innerHTML = '';
+            const allOption = document.createElement('option');
+            allOption.value = 'all';
+            allOption.dataset.i18n = 'common.all';
+            allOption.textContent = t('common.all');
+            selectEl.append(allOption);
+
             values.forEach((value) => {
                 const option = document.createElement('option');
-                option.value = value;
+                option.value = String(value);
                 option.textContent = value;
                 selectEl.append(option);
             });
-            if (retainValue && values.includes(previous)) {
-                selectEl.value = previous;
+        }
+
+        function setStatus(key, replacements = {}) {
+            reportStatus.dataset.i18n = key;
+            if (Object.keys(replacements).length) {
+                reportStatus.dataset.i18nArgs = JSON.stringify(replacements);
             } else {
-                selectEl.value = 'all';
+                delete reportStatus.dataset.i18nArgs;
             }
-            selectEl.disabled = values.length === 0;
+            reportStatus.textContent = t(key, replacements);
+        }
+
+        function setRecordCount(count) {
+            const args = { count: formatNumber(count) };
+            recordCount.dataset.i18n = 'attendanceReport.records.count';
+            recordCount.dataset.i18nArgs = JSON.stringify(args);
+            recordCount.textContent = t('attendanceReport.records.count', args);
+        }
+
+        function setTableMessage(key, replacements = {}) {
+            reportTableBody.innerHTML = '';
+            const row = document.createElement('tr');
+            const cell = document.createElement('td');
+            cell.colSpan = 4;
+            cell.className = 'empty-row';
+            cell.dataset.i18n = key;
+            if (Object.keys(replacements).length) {
+                cell.dataset.i18nArgs = JSON.stringify(replacements);
+            } else {
+                delete cell.dataset.i18nArgs;
+            }
+            cell.textContent = t(key, replacements);
+            row.append(cell);
+            reportTableBody.append(row);
         }
 
         function formatDateTime(value) {
             if (!value) return '--';
             try {
-                return new Date(value).toLocaleString(undefined, {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit'
-                });
-            } catch (err) {
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) {
+                    return value;
+                }
+                if (typeof I18N_API.formatDate === 'function') {
+                    return I18N_API.formatDate(date);
+                }
+                return date.toLocaleString();
+            } catch {
                 return value;
             }
         }
 
         function renderRecords(records) {
-            recordCount.textContent = `${records.length} students`;
-            if (!records.length) {
-                reportTableBody.innerHTML = '<tr><td colspan="4" class="empty-row">No attendance recorded for the selected filters.</td></tr>';
-                return;
-            }
             reportTableBody.innerHTML = '';
             records.forEach((record, index) => {
                 const row = document.createElement('tr');
                 const firstCheckIn = formatDateTime(record.first_check_in);
                 const lastCheckOut = formatDateTime(record.last_check_out);
-
                 row.innerHTML = `
                     <td>${index + 1}</td>
                     <td>${record.student_name}</td>
@@ -274,55 +353,109 @@
                 `;
                 reportTableBody.append(row);
             });
+            setRecordCount(records.length);
+        }
+
+        function buildParams() {
+            const params = new URLSearchParams();
+            if (state.year !== 'all') params.set('year', state.year);
+            if (state.month !== 'all') params.set('month', state.month);
+            if (state.day !== 'all') params.set('day', state.day);
+            return params;
+        }
+
+        function updateStatusLabel() {
+            const parts = [];
+            if (state.year !== 'all') parts.push(state.year);
+            if (state.month !== 'all') parts.push(state.month);
+            if (state.day !== 'all') parts.push(state.day);
+            if (parts.length) {
+                setStatus('attendanceReport.status.filters', { filters: parts.join('-') });
+            } else {
+                setStatus('attendanceReport.status.default');
+            }
         }
 
         async function loadReport(retainSelections = true) {
-            reportTableBody.innerHTML = '<tr><td colspan="4" class="empty-row">Loading...</td></tr>';
-            recordCount.textContent = '';
+            setStatus('attendanceReport.status.loading');
+            setRecordCount(0);
+            setTableMessage('attendanceReport.status.loading');
+
             try {
                 const params = buildParams();
                 const query = params.toString();
                 const response = await fetch(query ? `api/attendance/report?${query}` : 'api/attendance/report', { cache: 'no-store' });
                 if (!response.ok) {
-                    throw new Error('Request failed');
+                    throw new Error('REQUEST_FAILED');
                 }
                 const data = await response.json();
                 if (!data.enabled) {
-                    reportTableBody.innerHTML = '<tr><td colspan="4" class="empty-row">Attendance tracking is currently disabled.</td></tr>';
-                    recordCount.textContent = '';
+                    setStatus('attendanceReport.status.disabled');
+                    setTableMessage('attendanceReport.status.disabled');
+                    setRecordCount(0);
                     return;
                 }
 
                 const filters = data.filters || { years: [], months: [], days: [] };
-                populateSelect(yearFilter, filters.years, retainSelections);
-                populateSelect(monthFilter, filters.months, retainSelections);
-                populateSelect(dayFilter, filters.days, retainSelections);
+                populateSelect(yearFilter, filters.years || []);
+                populateSelect(monthFilter, filters.months || []);
+                populateSelect(dayFilter, filters.days || []);
 
-                if (data.selected) {
-                    if (data.selected.year && filters.years.includes(data.selected.year)) yearFilter.value = data.selected.year;
-                    if (data.selected.month && filters.months.includes(data.selected.month)) monthFilter.value = data.selected.month;
-                    if (data.selected.day && filters.days.includes(data.selected.day)) dayFilter.value = data.selected.day;
+                yearFilter.disabled = !filters.years || filters.years.length === 0;
+                monthFilter.disabled = !filters.months || filters.months.length === 0;
+                dayFilter.disabled = !filters.days || filters.days.length === 0;
+
+                if (!retainSelections && data.selected) {
+                    state.year = data.selected.year || 'all';
+                    state.month = data.selected.month || 'all';
+                    state.day = data.selected.day || 'all';
                 }
 
-                renderRecords(data.records || []);
-                updateStatus();
+                if (!filters.years?.includes(state.year)) {
+                    state.year = 'all';
+                }
+                yearFilter.value = state.year;
+
+                if (!monthFilter.disabled) {
+                    if (!filters.months?.includes(state.month)) {
+                        state.month = 'all';
+                    }
+                    monthFilter.value = state.month;
+                } else {
+                    state.month = 'all';
+                    monthFilter.value = 'all';
+                }
+
+                if (!dayFilter.disabled) {
+                    if (!filters.days?.includes(state.day)) {
+                        state.day = 'all';
+                    }
+                    dayFilter.value = state.day;
+                } else {
+                    state.day = 'all';
+                    dayFilter.value = 'all';
+                }
+
+                const records = data.records || [];
+                if (!records.length) {
+                    setTableMessage('attendanceReport.status.empty');
+                    updateStatusLabel();
+                    return;
+                }
+
+                renderRecords(records);
+                updateStatusLabel();
             } catch (error) {
-                reportTableBody.innerHTML = `<tr><td colspan="4" class="empty-row">Unable to load report: ${error.message}</td></tr>`;
-                recordCount.textContent = '';
+                setStatus('attendanceReport.status.error', { message: error.message });
+                setTableMessage('attendanceReport.status.error', { message: error.message });
+                setRecordCount(0);
             }
         }
 
-        function updateStatus() {
-            const parts = [];
-            if (yearFilter.value !== 'all') parts.push(yearFilter.value);
-            if (monthFilter.value !== 'all') parts.push(monthFilter.value);
-            if (dayFilter.value !== 'all') parts.push(dayFilter.value);
-            reportStatus.textContent = parts.length
-                ? `Filters applied: ${parts.join('-')}`
-                : 'Showing latest attendance records.';
-        }
-
         function handleFilterChange() {
+            state.year = yearFilter.value;
+            state.month = monthFilter.value;
+            state.day = dayFilter.value;
             loadReport(true);
         }
 
@@ -341,8 +474,14 @@
         exportButton.addEventListener('click', handleExport);
 
         document.addEventListener('DOMContentLoaded', () => {
-            loadReport(true);
+            loadReport(false);
         });
+
+        if (typeof I18N_API.onChange === 'function') {
+            I18N_API.onChange(() => {
+                loadReport(true);
+            });
+        }
     </script>
 </body>
 </html>
