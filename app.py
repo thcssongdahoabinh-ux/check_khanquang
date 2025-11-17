@@ -36,6 +36,9 @@ import yaml
 from flask import Flask, Response, abort, jsonify, redirect, request, send_from_directory, session, url_for
 
 from attendance import AttendanceRecord, AttendanceStore, RecognitionResult, Student, StudentRecognizer
+from email_sender import EmailSender
+from email_scheduler import EmailScheduler
+from email_logger import EmailLogStore
 
 _HAAR_FACE_CASCADE = None
 
@@ -98,6 +101,9 @@ _VIOLATION_STORE: Optional["ViolationStore"] = None
 _ATTENDANCE_STORE: Optional[AttendanceStore] = None
 _STUDENT_RECOGNIZER: Optional[StudentRecognizer] = None
 _ATTENDANCE_MANAGER: Optional["AttendanceManager"] = None
+_EMAIL_SENDER: Optional[EmailSender] = None
+_EMAIL_SCHEDULER: Optional[EmailScheduler] = None
+_EMAIL_LOG_STORE: Optional[EmailLogStore] = None
 _CONFIG_PATH: Optional[Path] = None
 _FACE_LOCK = threading.Lock()
 _CAPTURE_LOCK = threading.Lock()
@@ -139,6 +145,12 @@ class Settings:
     recognition_min_samples: int
     face_distance_threshold: float
     admin_password: str
+    email_enabled: bool
+    email_sender: str
+    email_password: str
+    email_receiver: str
+    email_schedule_hour: int
+    email_schedule_minute: int
 
 
 _CONFIG_FIELD_TYPES: Dict[str, type] = {
@@ -167,6 +179,12 @@ _CONFIG_FIELD_TYPES: Dict[str, type] = {
     "student_samples_dir": str,
     "recognition_min_samples": int,
     "face_distance_threshold": float,
+    "email_enabled": bool,
+    "email_sender": str,
+    "email_password": str,
+    "email_receiver": str,
+    "email_schedule_hour": int,
+    "email_schedule_minute": int,
 }
 
 
@@ -221,6 +239,12 @@ def load_settings(config_path: Path) -> Settings:
         recognition_min_samples=int(data.get("recognition_min_samples", 1)),
         face_distance_threshold=float(data.get("face_distance_threshold", 70.0)),
         admin_password=str(data.get("admin_password", "changeme123")),
+        email_enabled=bool(data.get("email_enabled", False)),
+        email_sender=str(data.get("email_sender", "")),
+        email_password=str(data.get("email_password", "")),
+        email_receiver=str(data.get("email_receiver", "")),
+        email_schedule_hour=int(data.get("email_schedule_hour", 18)),
+        email_schedule_minute=int(data.get("email_schedule_minute", 0)),
     )
 
 
@@ -965,6 +989,8 @@ def run_monitor(
     last_attendance_text = ""
     fps = 0.0
     last_time = time.time()
+    # Track when attendance threshold was reached for each track_id (to maintain blue color for 1 second)
+    attendance_threshold_timestamps: Dict[int, float] = {}
 
     _set_latest_stats(
         total=0,
@@ -1055,12 +1081,24 @@ def run_monitor(
             has_scarf = ratio >= settings.red_ratio_threshold or red_pixels >= settings.red_min_pixels
 
             person_color = (70, 135, 240)
-            scarf_color = (0, 0, 255)
-            no_scarf_color = (0, 165, 255)
+            scarf_color = (0, 255, 0)  # Green for "Scarf: YES"
+            no_scarf_color = (0, 0, 255)  # Red for "Scarf: NO"
             highlight_color = (72, 201, 91)
+            attendance_threshold_color = (255, 0, 0)  # Blue for attendance threshold reached
             recognized_highlight = False
+            attendance_threshold_reached = False
             name_label: Optional[str] = None
             label_box: Optional[Tuple[int, int, int, int]] = None
+            
+            # Check if attendance threshold was reached for this track_id within the last 1 second
+            current_time = time.time()
+            if track_id >= 0 and track_id in attendance_threshold_timestamps:
+                time_since_threshold = current_time - attendance_threshold_timestamps[track_id]
+                if time_since_threshold < 1.0:  # Maintain blue for at least 1 second
+                    attendance_threshold_reached = True
+                else:
+                    # Remove old entries (older than 1 second)
+                    del attendance_threshold_timestamps[track_id]
 
             status = f"Scarf: {'YES' if has_scarf else 'NO'} {ratio * 100:.1f}% ID:{track_id}"
             cv2.rectangle(frame, (x1, y1), (x2, y2), person_color, 2)
@@ -1112,6 +1150,10 @@ def run_monitor(
                             if attendance_manager:
                                 record = attendance_manager.mark_attendance(recognition)
                                 if record:
+                                    attendance_threshold_reached = True
+                                    # Store timestamp when threshold is reached for this track_id
+                                    if track_id >= 0:
+                                        attendance_threshold_timestamps[track_id] = current_time
                                     event_label = record.event_type.replace("_", " ").title()
                                     last_attendance_text = (
                                         f"{student.name} {event_label} @ {dt.datetime.now().strftime('%H:%M:%S')}"
@@ -1128,21 +1170,29 @@ def run_monitor(
                                             f"{student.name} seen recently (cooldown active)"
                                         )
 
-            status_color = highlight_color if recognized_highlight else status_color
+            # Use blue if attendance threshold reached, otherwise use green highlight or status color
+            if attendance_threshold_reached:
+                status_color = attendance_threshold_color
+                highlight_color = attendance_threshold_color
+            elif recognized_highlight:
+                status_color = highlight_color
             cv2.putText(frame, status, (x1, y1 - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, status_color, 2)
 
             if recognized_highlight:
-                cv2.rectangle(frame, (x1, y1), (x2, y2), highlight_color, 3)
+                current_highlight_color = attendance_threshold_color if attendance_threshold_reached else highlight_color
+                cv2.rectangle(frame, (x1, y1), (x2, y2), current_highlight_color, 3)
                 if label_box is not None and name_label is not None:
                     lx1, ly1, lx2, ly2 = label_box
-                    cv2.rectangle(frame, (lx1, ly1), (lx2, ly2), highlight_color, cv2.FILLED)
+                    cv2.rectangle(frame, (lx1, ly1), (lx2, ly2), current_highlight_color, cv2.FILLED)
+                    # Use white text for blue background, dark text for green background
+                    text_color = (255, 255, 255) if attendance_threshold_reached else (12, 30, 12)
                     cv2.putText(
                         frame,
                         name_label,
                         (lx1 + 6, ly2 - baseline - 2),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.6,
-                        (12, 30, 12),
+                        text_color,
                         2,
                     )
 
@@ -1296,6 +1346,47 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
     )
     monitor_thread.start()
 
+    # Wait a moment for monitor to initialize attendance store
+    time.sleep(1.0)
+
+    # Initialize email sender and scheduler if enabled
+    global _EMAIL_SENDER, _EMAIL_SCHEDULER, _EMAIL_LOG_STORE
+    if settings.email_enabled and settings.email_sender and settings.email_password and settings.email_receiver:
+        if _ATTENDANCE_STORE is not None:
+            try:
+                # Initialize email log store
+                _EMAIL_LOG_STORE = EmailLogStore(settings.db_path)
+                
+                _EMAIL_SENDER = EmailSender(
+                    sender_email=settings.email_sender,
+                    sender_password=settings.email_password,
+                    receiver_email=settings.email_receiver,
+                    email_log_store=_EMAIL_LOG_STORE,
+                )
+                _EMAIL_SCHEDULER = EmailScheduler(
+                    attendance_store=_ATTENDANCE_STORE,
+                    email_sender=_EMAIL_SENDER,
+                    schedule_hour=settings.email_schedule_hour,
+                    schedule_minute=settings.email_schedule_minute,
+                    email_log_store=_EMAIL_LOG_STORE,
+                )
+                _EMAIL_SCHEDULER.start()
+                print(f"[INFO] Email scheduler initialized and started")
+            except Exception as e:
+                print(f"[WARN] Failed to initialize email scheduler: {e}")
+                _EMAIL_SENDER = None
+                _EMAIL_SCHEDULER = None
+                _EMAIL_LOG_STORE = None
+        else:
+            print("[WARN] Email scheduler not started: attendance store not available")
+            _EMAIL_SENDER = None
+            _EMAIL_SCHEDULER = None
+            _EMAIL_LOG_STORE = None
+    else:
+        _EMAIL_SENDER = None
+        _EMAIL_SCHEDULER = None
+        _EMAIL_LOG_STORE = None
+
     app = Flask(__name__, static_folder=str(Path(__file__).parent), static_url_path="")
     app.secret_key = settings.admin_password or "changeme123"
     app.config["SESSION_COOKIE_NAME"] = "admin_session"
@@ -1324,6 +1415,12 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
         if not session.get("admin_authenticated"):
             return redirect(url_for("admin_login", next=request.path))
         return send_from_directory(app.static_folder, "admin.html")
+
+    @app.route("/email_history.html")
+    def email_history_page() -> Response:
+        if not session.get("admin_authenticated"):
+            return redirect(url_for("admin_login", next=request.path))
+        return send_from_directory(app.static_folder, "email_history.html")
 
     @app.route("/admin-login", methods=["GET", "POST"])
     def admin_login() -> Response:
@@ -1723,11 +1820,47 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
     @app.route("/api/attendance/logs")
     def api_attendance_logs() -> Response:
         if _ATTENDANCE_STORE is None:
-            return jsonify({"enabled": False, "records": []})
+            return jsonify({"enabled": False, "records": [], "pagination": {}})
 
         store = _ATTENDANCE_STORE
-        limit = request.args.get("limit", default=50, type=int)
-        records = store.recent_attendance(limit=limit)
+
+        # Parse pagination parameters
+        per_page_param = request.args.get("per_page") or request.args.get("limit")
+        try:
+            per_page = int(per_page_param) if per_page_param else 50
+        except ValueError:
+            abort(400, description="Invalid per_page parameter")
+        per_page = max(1, min(per_page, 500))
+
+        page = request.args.get("page", default=1, type=int)
+        if page is None or page < 1:
+            page = 1
+        offset = (page - 1) * per_page
+
+        # Parse filter parameters
+        start_date = request.args.get("start_date")
+        end_date = request.args.get("end_date")
+        student_name = request.args.get("student_name", "").strip() or None
+
+        # Validate date parameters
+        if start_date:
+            try:
+                dt.date.fromisoformat(start_date)
+            except ValueError:
+                abort(400, description="Invalid start_date parameter")
+        if end_date:
+            try:
+                dt.date.fromisoformat(end_date)
+            except ValueError:
+                abort(400, description="Invalid end_date parameter")
+
+        records, total_count = store.attendance_logs_filtered(
+            limit=per_page,
+            offset=offset,
+            start_date=start_date,
+            end_date=end_date,
+            student_name=student_name,
+        )
 
         student_map: Dict[int, Student] = {student.id: student for student in store.list_students()}
         items = []
@@ -1743,8 +1876,70 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
                     "confidence": record.confidence,
                 }
             )
+
+        total_pages = (total_count + per_page - 1) // per_page if total_count else 0
+        pagination = {
+            "page": page,
+            "per_page": per_page,
+            "total": total_count,
+            "total_pages": total_pages,
+            "has_prev": page > 1 and total_count > 0,
+            "has_next": page < total_pages,
+        }
+
         summary = store.attendance_summary()
-        return jsonify({"enabled": True, "records": items, "attendance": summary})
+        return jsonify({"enabled": True, "records": items, "attendance": summary, "pagination": pagination})
+
+    @app.route("/api/email/send", methods=["POST"])
+    def api_email_send() -> Response:
+        _require_admin_api()
+        if _EMAIL_SCHEDULER is None:
+            return jsonify({"success": False, "message": "Email scheduler is not enabled or not initialized"}), 503
+        
+        try:
+            success = _EMAIL_SCHEDULER.send_now()
+            if success:
+                return jsonify({"success": True, "message": "Timesheet email sent successfully"})
+            else:
+                return jsonify({"success": False, "message": "Failed to send email. Check server logs for details"}), 500
+        except Exception as e:
+            return jsonify({"success": False, "message": f"Error sending email: {str(e)}"}), 500
+
+    @app.route("/api/email/logs")
+    def api_email_logs() -> Response:
+        _require_admin_api()
+        if _EMAIL_LOG_STORE is None:
+            return jsonify({"enabled": False, "logs": [], "statistics": {}})
+
+        limit = request.args.get("limit", default=50, type=int)
+        start_date = request.args.get("start_date")
+        end_date = request.args.get("end_date")
+
+        start = dt.date.fromisoformat(start_date) if start_date else None
+        end = dt.date.fromisoformat(end_date) if end_date else None
+
+        if start or end:
+            logs = _EMAIL_LOG_STORE.get_logs_by_date_range(start_date=start, end_date=end, limit=limit)
+        else:
+            logs = _EMAIL_LOG_STORE.get_recent_logs(limit=limit)
+
+        statistics = _EMAIL_LOG_STORE.get_statistics()
+
+        items = []
+        for log in logs:
+            items.append(
+                {
+                    "id": log.id,
+                    "sent_at": log.sent_at.isoformat(),
+                    "receiver_email": log.receiver_email,
+                    "report_date": log.report_date.isoformat(),
+                    "status": log.status,
+                    "error_message": log.error_message,
+                    "student_count": log.student_count,
+                }
+            )
+
+        return jsonify({"enabled": True, "logs": items, "statistics": statistics})
 
     @app.route("/api/attendance/report")
     def api_attendance_report() -> Response:
@@ -1877,6 +2072,8 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
         app.run(host=host, port=port, debug=False, threaded=True, use_reloader=False)
     finally:
         stop_event.set()
+        if _EMAIL_SCHEDULER:
+            _EMAIL_SCHEDULER.stop()
         monitor_thread.join(timeout=5)
 
 

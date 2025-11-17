@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Email History</title>
+    <style>
+        :root {
+            color-scheme: dark;
+        }
+        body {
+            font-family: "Inter", Arial, sans-serif;
+            background: #0b1120;
+            color: #e2e8f0;
+            margin: 0;
+        }
+        main {
+            width: min(1100px, 95vw);
+            margin: 2rem auto 4rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.8rem;
+        }
+        header {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+        .header-actions {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+        h1 {
+            margin: 0;
+            font-size: clamp(1.9rem, 2.5vw, 2.4rem);
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+        .subtitle {
+            color: #94a3b8;
+            font-size: 0.95rem;
+            margin-top: 0.35rem;
+        }
+        button, a.button {
+            padding: 0.6rem 1.4rem;
+            border-radius: 999px;
+            border: none;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            color: #0f172a;
+            background: linear-gradient(135deg, #38bdf8, #6366f1);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        button:hover, a.button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 14px 28px rgba(99, 102, 241, 0.35);
+        }
+        button:disabled {
+            cursor: not-allowed;
+            opacity: 0.6;
+            transform: none;
+            box-shadow: none;
+        }
+        .card {
+            background: #111c2e;
+            border-radius: 18px;
+            padding: 1.4rem;
+            box-shadow: 0 22px 50px rgba(15, 23, 42, 0.55);
+        }
+        .filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: flex-end;
+        }
+        .filters label {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #94a3b8;
+        }
+        input[type="date"] {
+            appearance: none;
+            background: rgba(15, 23, 42, 0.55);
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            border-radius: 12px;
+            color: inherit;
+            font-size: 0.95rem;
+            padding: 0.6rem 0.9rem;
+            min-width: 160px;
+        }
+        button[type="button"] {
+            padding: 0.6rem 1.2rem;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1.2rem;
+        }
+        thead {
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            font-size: 0.75rem;
+        }
+        th, td {
+            padding: 0.75rem 0.5rem;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+            text-align: left;
+        }
+        tbody tr:last-child td {
+            border-bottom: none;
+        }
+        tbody tr:hover {
+            background: rgba(59, 130, 246, 0.12);
+        }
+        .empty-row {
+            text-align: center;
+            color: #94a3b8;
+            padding: 1.2rem 0;
+        }
+        .status-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            color: #94a3b8;
+        }
+        .status-highlight {
+            color: #cbd5f5;
+            font-weight: 600;
+        }
+        .status-badge {
+            padding: 0.3rem 0.7rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            font-weight: 600;
+        }
+        .status-success {
+            background: rgba(34, 197, 94, 0.2);
+            color: #4ade80;
+        }
+        .status-failed {
+            background: rgba(239, 68, 68, 0.2);
+            color: #f87171;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.2rem;
+        }
+        .stat-card {
+            background: rgba(15, 23, 42, 0.55);
+            border-radius: 12px;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .stat-label {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #94a3b8;
+        }
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #cbd5f5;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <header>
+            <div>
+                <h1>Email History</h1>
+                <p class="subtitle">View sending email history and statistics</p>
+            </div>
+            <div class="header-actions">
+                <button id="sendReportButton" class="button" type="button">Send Today's Report</button>
+                <a class="button" href="admin.html">Back to Admin</a>
+                <a class="button" href="attendance_report.html">Attendance Report</a>
+                <a class="button" href="webcam.html">Back to Monitor</a>
+            </div>
+        </header>
+
+        <section class="card" id="statsCard" style="display: none;">
+            <div class="stats-grid" id="statsGrid"></div>
+        </section>
+
+        <section class="card">
+            <form class="filters" id="filtersForm" onsubmit="return false;">
+                <label>
+                    <span>Start Date</span>
+                    <input type="date" id="startDateFilter">
+                </label>
+                <label>
+                    <span>End Date</span>
+                    <input type="date" id="endDateFilter">
+                </label>
+                <label>
+                    <span>Limit</span>
+                    <select id="limitFilter">
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                        <option value="500">500</option>
+                    </select>
+                </label>
+                <button id="refreshButton" type="button">Refresh</button>
+                <button id="clearFiltersButton" type="button">Clear Filters</button>
+            </form>
+
+            <div class="status-bar">
+                <span id="reportStatus">Loading email history...</span>
+                <span id="recordCount" class="status-highlight"></span>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width:70px;">No.</th>
+                        <th>Sent At</th>
+                        <th>Receiver Email</th>
+                        <th>Report Date</th>
+                        <th style="width:100px;">Student Count</th>
+                        <th style="width:120px;">Status</th>
+                        <th>Error Message</th>
+                    </tr>
+                </thead>
+                <tbody id="logsTableBody">
+                    <tr>
+                        <td colspan="7" class="empty-row">Loading...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <script>
+        const startDateFilter = document.getElementById('startDateFilter');
+        const endDateFilter = document.getElementById('endDateFilter');
+        const limitFilter = document.getElementById('limitFilter');
+        const refreshButton = document.getElementById('refreshButton');
+        const clearFiltersButton = document.getElementById('clearFiltersButton');
+        const sendReportButton = document.getElementById('sendReportButton');
+        const logsTableBody = document.getElementById('logsTableBody');
+        const reportStatus = document.getElementById('reportStatus');
+        const recordCount = document.getElementById('recordCount');
+        const statsCard = document.getElementById('statsCard');
+        const statsGrid = document.getElementById('statsGrid');
+
+        function formatDateTime(value) {
+            if (!value) return '--';
+            try {
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) {
+                    return value;
+                }
+                return date.toLocaleString();
+            } catch {
+                return value;
+            }
+        }
+
+        function formatDate(value) {
+            if (!value) return '--';
+            try {
+                const date = new Date(value);
+                if (Number.isNaN(date.getTime())) {
+                    return value;
+                }
+                return date.toLocaleDateString();
+            } catch {
+                return value;
+            }
+        }
+
+        function renderStats(statistics) {
+            if (!statistics || Object.keys(statistics).length === 0) {
+                statsCard.style.display = 'none';
+                return;
+            }
+
+            statsCard.style.display = 'block';
+            statsGrid.innerHTML = '';
+
+            const stats = [
+                { label: 'Total Sent', value: statistics.total_sent || 0, key: 'total_sent' },
+                { label: 'Successful', value: statistics.total_success || 0, key: 'total_success' },
+                { label: 'Failed', value: statistics.total_failed || 0, key: 'total_failed' },
+                { label: 'Success Rate', value: statistics.success_rate ? `${(statistics.success_rate * 100).toFixed(1)}%` : '0%', key: 'success_rate' },
+            ];
+
+            stats.forEach(stat => {
+                const card = document.createElement('div');
+                card.className = 'stat-card';
+                const label = document.createElement('div');
+                label.className = 'stat-label';
+                label.textContent = stat.label;
+                const value = document.createElement('div');
+                value.className = 'stat-value';
+                value.textContent = stat.value;
+                card.appendChild(label);
+                card.appendChild(value);
+                statsGrid.appendChild(card);
+            });
+        }
+
+        function renderLogs(logs) {
+            logsTableBody.innerHTML = '';
+            if (!logs || logs.length === 0) {
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.colSpan = 7;
+                cell.className = 'empty-row';
+                cell.textContent = 'No email logs found.';
+                row.appendChild(cell);
+                logsTableBody.appendChild(row);
+                recordCount.textContent = '0 records';
+                return;
+            }
+
+            logs.forEach((log, index) => {
+                const row = document.createElement('tr');
+                const statusBadge = document.createElement('span');
+                statusBadge.className = 'status-badge';
+                
+                if (log.status === 'success') {
+                    statusBadge.classList.add('status-success');
+                    statusBadge.textContent = 'Success';
+                } else {
+                    statusBadge.classList.add('status-failed');
+                    statusBadge.textContent = 'Failed';
+                }
+
+                row.innerHTML = `
+                    <td>${index + 1}</td>
+                    <td>${formatDateTime(log.sent_at)}</td>
+                    <td>${log.receiver_email || '--'}</td>
+                    <td>${formatDate(log.report_date)}</td>
+                    <td>${log.student_count || 0}</td>
+                    <td></td>
+                    <td>${log.error_message || '--'}</td>
+                `;
+                
+                const statusCell = row.querySelector('td:nth-child(6)');
+                statusCell.appendChild(statusBadge);
+                
+                logsTableBody.appendChild(row);
+            });
+
+            recordCount.textContent = `${logs.length} record${logs.length !== 1 ? 's' : ''}`;
+        }
+
+        async function loadEmailLogs() {
+            reportStatus.textContent = 'Loading email history...';
+            recordCount.textContent = '';
+            logsTableBody.innerHTML = '<tr><td colspan="7" class="empty-row">Loading...</td></tr>';
+
+            try {
+                const params = new URLSearchParams();
+                const limit = limitFilter.value;
+                params.append('limit', limit);
+
+                if (startDateFilter.value) {
+                    params.append('start_date', startDateFilter.value);
+                }
+                if (endDateFilter.value) {
+                    params.append('end_date', endDateFilter.value);
+                }
+
+                const response = await fetch(`api/email/logs?${params.toString()}`, {
+                    cache: 'no-store'
+                });
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        throw new Error('Authentication required. Please log in.');
+                    }
+                    throw new Error(`Request failed: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+
+                if (!data.enabled) {
+                    reportStatus.textContent = 'Email logging is disabled.';
+                    logsTableBody.innerHTML = '<tr><td colspan="7" class="empty-row">Email logging is not enabled.</td></tr>';
+                    recordCount.textContent = '0 records';
+                    statsCard.style.display = 'none';
+                    return;
+                }
+
+                renderStats(data.statistics || {});
+                renderLogs(data.logs || []);
+                reportStatus.textContent = 'Email history loaded successfully.';
+            } catch (error) {
+                reportStatus.textContent = `Error: ${error.message}`;
+                logsTableBody.innerHTML = `<tr><td colspan="7" class="empty-row" style="color: #f87171;">Error loading email history: ${error.message}</td></tr>`;
+                recordCount.textContent = '0 records';
+                statsCard.style.display = 'none';
+            }
+        }
+
+        function clearFilters() {
+            startDateFilter.value = '';
+            endDateFilter.value = '';
+            limitFilter.value = '50';
+            loadEmailLogs();
+        }
+
+        async function sendTodayReport() {
+            const originalText = sendReportButton.textContent;
+            sendReportButton.disabled = true;
+            sendReportButton.textContent = 'Sending...';
+            
+            try {
+                const response = await fetch('api/email/send', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    reportStatus.textContent = 'Today\'s report sent successfully!';
+                    reportStatus.style.color = '#4ade80';
+                    // Reload email logs to show the new entry
+                    setTimeout(() => {
+                        loadEmailLogs();
+                        reportStatus.style.color = '';
+                    }, 1000);
+                } else {
+                    reportStatus.textContent = `Failed to send report: ${data.message || 'Unknown error'}`;
+                    reportStatus.style.color = '#f87171';
+                }
+            } catch (error) {
+                reportStatus.textContent = `Error sending report: ${error.message}`;
+                reportStatus.style.color = '#f87171';
+            } finally {
+                sendReportButton.disabled = false;
+                sendReportButton.textContent = originalText;
+            }
+        }
+
+        refreshButton.addEventListener('click', loadEmailLogs);
+        clearFiltersButton.addEventListener('click', clearFilters);
+        sendReportButton.addEventListener('click', sendTodayReport);
+        startDateFilter.addEventListener('change', loadEmailLogs);
+        endDateFilter.addEventListener('change', loadEmailLogs);
+        limitFilter.addEventListener('change', loadEmailLogs);
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadEmailLogs();
+        });
+    </script>
+</body>
+</html>
+

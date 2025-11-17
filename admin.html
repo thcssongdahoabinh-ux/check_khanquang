@@ -429,8 +429,22 @@
                 <h2 style="margin:0;" data-i18n="admin.attendance.heading">Attendance Logs</h2>
                 <span class="badge" id="attendanceTotalBadge" data-i18n="admin.attendance.badge" data-i18n-args='{"count":"0"}'>0 entries</span>
             </div>
+            
+            <div style="margin-top:1.2rem; display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+                <input type="date" id="attendanceFilterStartDate" style="background:rgba(15, 23, 42, 0.55); border:1px solid rgba(148, 163, 184, 0.35); border-radius:999px; padding:0.6rem 1.1rem; color:inherit; font-size:0.95rem;" placeholder="Start Date">
+                <input type="date" id="attendanceFilterEndDate" style="background:rgba(15, 23, 42, 0.55); border:1px solid rgba(148, 163, 184, 0.35); border-radius:999px; padding:0.6rem 1.1rem; color:inherit; font-size:0.95rem;" placeholder="End Date">
+                <input type="text" id="attendanceFilterName" style="background:rgba(15, 23, 42, 0.55); border:1px solid rgba(148, 163, 184, 0.35); border-radius:999px; padding:0.6rem 1.1rem; color:inherit; font-size:0.95rem; min-width:200px;" placeholder="Filter by name" data-i18n-placeholder="admin.attendance.filterName">
+                <button type="button" id="attendanceFilterClear" class="table-action-btn" style="padding:0.6rem 1.2rem; font-size:0.9rem;" data-i18n="admin.attendance.clearFilters">Clear Filters</button>
+            </div>
+            
             <div id="attendanceList" class="attendance-list" style="margin-top:1.2rem;">
                 <div class="empty-state" data-i18n="admin.attendance.empty">Logs will appear here once attendance is recorded.</div>
+            </div>
+            
+            <div id="attendancePagination" style="display:none; margin-top:1.2rem; justify-content:center; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+                <button type="button" id="attendancePagePrev" class="table-action-btn" disabled data-i18n="admin.attendance.prevPage">Previous</button>
+                <span id="attendancePageInfo" style="color:#94a3b8; font-size:0.9rem;">Page 1 of 1</span>
+                <button type="button" id="attendancePageNext" class="table-action-btn" disabled data-i18n="admin.attendance.nextPage">Next</button>
             </div>
         </section>
     </main>
@@ -452,6 +466,14 @@
         const capturePreviewOverlay = document.getElementById('capturePreviewOverlay');
         const attendanceList = document.getElementById('attendanceList');
         const attendanceTotalBadge = document.getElementById('attendanceTotalBadge');
+        const attendanceFilterStartDate = document.getElementById('attendanceFilterStartDate');
+        const attendanceFilterEndDate = document.getElementById('attendanceFilterEndDate');
+        const attendanceFilterName = document.getElementById('attendanceFilterName');
+        const attendanceFilterClear = document.getElementById('attendanceFilterClear');
+        const attendancePagination = document.getElementById('attendancePagination');
+        const attendancePagePrev = document.getElementById('attendancePagePrev');
+        const attendancePageNext = document.getElementById('attendancePageNext');
+        const attendancePageInfo = document.getElementById('attendancePageInfo');
         const addStudentForm = document.getElementById('addStudentForm');
         const studentNameInput = document.getElementById('studentNameInput');
 
@@ -463,6 +485,9 @@
         let isCapturing = false;
         let previewActive = false;
         let previewReconnectTimer = null;
+        let attendanceCurrentPage = 1;
+        let attendancePerPage = 20;
+        let attendancePaginationData = null;
 
         function translateOrDefault(key, fallback, replacements) {
             const translated = t(key, replacements);
@@ -914,18 +939,36 @@
 
         async function loadAttendance() {
             try {
-                const data = await fetchJSON('api/attendance/logs?limit=100');
+                const params = new URLSearchParams();
+                params.append('page', String(attendanceCurrentPage));
+                params.append('per_page', String(attendancePerPage));
+                
+                if (attendanceFilterStartDate && attendanceFilterStartDate.value) {
+                    params.append('start_date', attendanceFilterStartDate.value);
+                }
+                if (attendanceFilterEndDate && attendanceFilterEndDate.value) {
+                    params.append('end_date', attendanceFilterEndDate.value);
+                }
+                if (attendanceFilterName && attendanceFilterName.value.trim()) {
+                    params.append('student_name', attendanceFilterName.value.trim());
+                }
+
+                const data = await fetchJSON(`api/attendance/logs?${params.toString()}`);
                 if (!data.enabled) {
                     updateAttendanceBadge(0);
                     renderAttendanceMessage('admin.attendance.disabled');
+                    attendancePagination.style.display = 'none';
                     return;
                 }
 
                 const records = data.records || [];
-                updateAttendanceBadge(records.length);
+                attendancePaginationData = data.pagination || null;
+                const total = attendancePaginationData ? attendancePaginationData.total : records.length;
+                updateAttendanceBadge(total);
 
                 if (!records.length) {
                     renderAttendanceMessage('admin.attendance.empty');
+                    attendancePagination.style.display = 'none';
                     return;
                 }
 
@@ -953,10 +996,37 @@
                     item.append(meta, badge);
                     attendanceList.append(item);
                 });
+
+                updateAttendancePagination();
             } catch (error) {
                 updateAttendanceBadge(0);
                 renderAttendanceMessage('admin.attendance.error', { message: error.message });
+                attendancePagination.style.display = 'none';
             }
+        }
+
+        function updateAttendancePagination() {
+            if (!attendancePaginationData || attendancePaginationData.total_pages <= 1) {
+                attendancePagination.style.display = 'none';
+                return;
+            }
+
+            attendancePagination.style.display = 'flex';
+            attendancePagePrev.disabled = !attendancePaginationData.has_prev;
+            attendancePageNext.disabled = !attendancePaginationData.has_next;
+            
+            const totalPages = attendancePaginationData.total_pages || 1;
+            const currentPage = attendancePaginationData.page || 1;
+            const total = attendancePaginationData.total || 0;
+            
+            attendancePageInfo.textContent = `Page ${currentPage} of ${totalPages} (${total} total)`;
+        }
+
+        function goToAttendancePage(page) {
+            if (page < 1) return;
+            if (attendancePaginationData && page > attendancePaginationData.total_pages) return;
+            attendanceCurrentPage = page;
+            loadAttendance();
         }
 
         addStudentForm.addEventListener('submit', async (event) => {
@@ -1022,6 +1092,52 @@
         }
 
         captureSampleButton.addEventListener('click', captureSample);
+
+        if (attendanceFilterStartDate) {
+            attendanceFilterStartDate.addEventListener('change', () => {
+                attendanceCurrentPage = 1;
+                loadAttendance();
+            });
+        }
+        if (attendanceFilterEndDate) {
+            attendanceFilterEndDate.addEventListener('change', () => {
+                attendanceCurrentPage = 1;
+                loadAttendance();
+            });
+        }
+        if (attendanceFilterName) {
+            let nameFilterTimeout = null;
+            attendanceFilterName.addEventListener('input', () => {
+                clearTimeout(nameFilterTimeout);
+                nameFilterTimeout = setTimeout(() => {
+                    attendanceCurrentPage = 1;
+                    loadAttendance();
+                }, 500);
+            });
+        }
+        if (attendanceFilterClear) {
+            attendanceFilterClear.addEventListener('click', () => {
+                if (attendanceFilterStartDate) attendanceFilterStartDate.value = '';
+                if (attendanceFilterEndDate) attendanceFilterEndDate.value = '';
+                if (attendanceFilterName) attendanceFilterName.value = '';
+                attendanceCurrentPage = 1;
+                loadAttendance();
+            });
+        }
+        if (attendancePagePrev) {
+            attendancePagePrev.addEventListener('click', () => {
+                if (attendancePaginationData && attendancePaginationData.has_prev) {
+                    goToAttendancePage(attendanceCurrentPage - 1);
+                }
+            });
+        }
+        if (attendancePageNext) {
+            attendancePageNext.addEventListener('click', () => {
+                if (attendancePaginationData && attendancePaginationData.has_next) {
+                    goToAttendancePage(attendanceCurrentPage + 1);
+                }
+            });
+        }
 
         if (typeof I18N_API.onChange === 'function') {
             I18N_API.onChange(() => {

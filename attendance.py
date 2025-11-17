@@ -397,6 +397,69 @@ class AttendanceStore:
             )
         return records
 
+    def attendance_logs_filtered(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        student_name: Optional[str] = None,
+    ) -> Tuple[List[AttendanceRecord], int]:
+        """
+        Query attendance logs with filtering and pagination.
+        Returns (records, total_count).
+        """
+        limit = max(1, min(int(limit), 500))
+        offset = max(0, int(offset))
+
+        where_clauses: List[str] = []
+        params: List[object] = []
+
+        if start_date:
+            where_clauses.append("date(timestamp, 'localtime') >= ?")
+            params.append(start_date)
+        if end_date:
+            where_clauses.append("date(timestamp, 'localtime') <= ?")
+            params.append(end_date)
+        if student_name:
+            where_clauses.append("student_id IN (SELECT id FROM students WHERE name LIKE ?)")
+            params.append(f"%{student_name}%")
+
+        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        with sqlite3.connect(self._db_path) as conn:
+            # Get total count
+            total_row = conn.execute(
+                f"SELECT COUNT(*) FROM attendance_logs{where_sql}",
+                params,
+            ).fetchone()
+            total_count = int(total_row[0]) if total_row else 0
+
+            # Get paginated records
+            rows = conn.execute(
+                f"""
+                SELECT id, student_id, event_type, timestamp, confidence
+                FROM attendance_logs
+                {where_sql}
+                ORDER BY timestamp DESC LIMIT ? OFFSET ?
+                """,
+                params + [limit, offset],
+            ).fetchall()
+
+        records: List[AttendanceRecord] = []
+        for row in rows:
+            records.append(
+                AttendanceRecord(
+                    id=int(row[0]),
+                    student_id=int(row[1]),
+                    event_type=str(row[2]),
+                    timestamp=dt.datetime.fromisoformat(row[3]),
+                    confidence=float(row[4]) if row[4] is not None else None,
+                )
+            )
+        return records, total_count
+
     # -------------------------------------------------------------- statistics
 
     def attendance_summary(self, *, date: Optional[dt.date] = None) -> Dict[str, int]:
