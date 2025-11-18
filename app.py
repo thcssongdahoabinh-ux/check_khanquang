@@ -1015,16 +1015,52 @@ def run_monitor(
     _set_capture_active(settings.save_violation_images)
     _set_sound_enabled(settings.enable_sound_alert)
 
-    # Always use OpenCV VideoCapture backend only
-    print(f"[DEBUG] Attempting to open camera with index {settings.camera_index}...")
-    cap = init_videocapture(index=settings.camera_index, try_alternate=False)
-    if cap is None:
-        import os
-        cam_devices = [d for d in os.listdir('/dev') if d.startswith('video')]
-        print(f"[ERROR] Unable to open camera (VideoCapture) at index {settings.camera_index}.")
-        print(f"[DEBUG] /dev/video* devices found: {cam_devices}")
-        raise RuntimeError(f"Unable to open camera (VideoCapture) at index {settings.camera_index}. Devices: {cam_devices}")
-    print(f"[INFO] Using OpenCV VideoCapture backend (index {settings.camera_index})")
+    # Try camera backends in this order: Picamera2 -> rpicam -> OpenCV VideoCapture
+    picam2 = None
+    rpicam_cam = None
+    cap = None
+
+    print(f"[DEBUG] Attempting to open camera backends (preferred: Picamera2, rpicam, OpenCV).")
+    # Try Picamera2 first (keeps camera open and is efficient on Raspberry Pi)
+    try:
+        from camera_backend import has_picamera2, init_picamera2, has_rpicam, init_rpicam, init_videocapture
+    except Exception:
+        # fallback to the already imported init_videocapture
+        from camera_backend import init_videocapture
+
+    try:
+        try:
+            if has_picamera2():
+                print("[DEBUG] Picamera2 appears available; attempting to initialize...")
+                picam2 = init_picamera2()
+                if picam2 is not None:
+                    print("[INFO] Using Picamera2 backend")
+        except Exception:
+            picam2 = None
+
+        if picam2 is None:
+            try:
+                if has_rpicam():
+                    print("[DEBUG] rpicam appears available; attempting to initialize...")
+                    rpicam_cam = init_rpicam()
+                    if rpicam_cam is not None:
+                        print("[INFO] Using rpicam backend")
+            except Exception:
+                rpicam_cam = None
+
+        if picam2 is None and rpicam_cam is None:
+            print(f"[DEBUG] Falling back to OpenCV VideoCapture (index {settings.camera_index})")
+            cap = init_videocapture(index=settings.camera_index, try_alternate=False)
+            if cap is None:
+                import os
+                cam_devices = [d for d in os.listdir('/dev') if d.startswith('video')]
+                print(f"[ERROR] Unable to open any camera backend.")
+                print(f"[DEBUG] /dev/video* devices found: {cam_devices}")
+                raise RuntimeError(f"Unable to open any camera backend. Devices: {cam_devices}")
+            print(f"[INFO] Using OpenCV VideoCapture backend (index {settings.camera_index})")
+    except Exception as e:
+        print(f"[ERROR] Exception while initializing camera backends: {e}")
+        raise
 
     print("Running...")
     if display:
@@ -1054,29 +1090,42 @@ def run_monitor(
         if stop_event and stop_event.is_set():
             break
 
-        # Capture frame from OpenCV VideoCapture only
+        # Capture frame from the selected backend
         frame = None
         try:
-            success, frame = cap.read()
-            if not success or frame is None:
-                print(f"[ERROR] cap.read() failed (success={success}, frame={type(frame)})")
+            if picam2 is not None:
+                # Picamera2 adapter should already be started by init_picamera2
+                frame = picam2.capture_array()
+            elif rpicam_cam is not None:
+                frame = rpicam_cam.capture_array()
+            elif cap is not None:
+                success, frame = cap.read()
+                if not success or frame is None:
+                    frame = None
+            else:
                 frame = None
         except Exception as e:
             print(f"[WARN] Camera capture exception: {e}")
             frame = None
 
         if frame is None:
-            print("[WARN] Camera read failed. Reconnecting VideoCapture...")
-            try:
-                cap.release()
-            except Exception:
-                pass
-            time.sleep(1)
-            cap = init_videocapture(index=settings.camera_index, try_alternate=False)
-            if cap is None:
-                print("[ERROR] Reopening VideoCapture failed; exiting")
-                break
-            continue
+            # If using VideoCapture, attempt to reopen; for other backends, log and retry
+            if cap is not None:
+                print("[WARN] Camera read failed. Reconnecting VideoCapture...")
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+                time.sleep(1)
+                cap = init_videocapture(index=settings.camera_index, try_alternate=False)
+                if cap is None:
+                    print("[ERROR] Reopening VideoCapture failed; exiting")
+                    break
+                continue
+            else:
+                print("[WARN] Camera read failed on non-VideoCapture backend. Retrying...")
+                time.sleep(0.5)
+                continue
 
         raw_frame = frame.copy()
         _update_latest_raw_frame(raw_frame)
@@ -1102,6 +1151,23 @@ def run_monitor(
             else:
                 time.sleep(0.05)
             continue
+
+        # Ensure frame has 3 channels (BGR) for YOLO; Picamera2 may produce 4-channel images
+        try:
+            if frame is not None and frame.ndim == 3 and frame.shape[2] == 4:
+                # Convert RGBA/BGRA -> BGR
+                try:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                except Exception:
+                    # fallback to BGRA->BGR
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+
+            # Ensure uint8 contiguous array
+            if frame is not None:
+                frame = frame.astype('uint8')
+                frame = np.ascontiguousarray(frame)
+        except Exception as e:
+            print(f"[WARN] Frame conversion for YOLO failed: {e}")
 
         results = model.predict(frame, imgsz=settings.imgsz, conf=settings.confidence, verbose=False)
 
@@ -1316,13 +1382,11 @@ def run_monitor(
     except Exception:
         pass
     try:
-        if rpicam_cam is not None:
-            # adapter exposes stop/release
-            if hasattr(rpicam_cam, 'stop'):
-                try:
-                    rpicam_cam.stop()
-                except Exception:
-                    pass
+        if rpicam_cam is not None and hasattr(rpicam_cam, 'stop'):
+            try:
+                rpicam_cam.stop()
+            except Exception:
+                pass
     except Exception:
         pass
     if display:
