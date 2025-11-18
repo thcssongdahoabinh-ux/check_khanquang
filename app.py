@@ -29,7 +29,11 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import cv2
 import numpy as np
-from ultralytics import YOLO
+# Importing heavy/optional ML libraries at module import time can make
+# unit tests and tooling fragile when the dependency is not installed.
+# The YOLO class will be imported lazily inside `run_monitor` so the
+# module can be imported for testing even if `ultralytics` is missing.
+YOLO = None
 
 from camera_backend import init_videocapture
 
@@ -676,10 +680,14 @@ def neck_box_from_bbox(bbox: Tuple[int, int, int, int], frame_shape: Tuple[int, 
 
     cx = x1 + bw // 2
     # Keep the neck crop near the upper torso but not too tall.
-    cy = y1 + int(bh * 0.28)
 
-    neck_width = int(np.clip(bw * 0.45, 80, 220))
-    neck_height = int(np.clip(bh * 0.30, 60, 160))
+    # Move the neck crop lower on the torso (was 0.28).
+    # Increase the area to better capture scarves when camera framing changed.
+    cy = y1 + int(bh * 0.40)
+
+    # Make the neck region wider and taller relative to the person bbox.
+    neck_width = int(np.clip(bw * 0.6, 100, 350))
+    neck_height = int(np.clip(bh * 0.45, 80, 260))
 
     nx1 = max(cx - neck_width // 2, 0)
     ny1 = max(cy - neck_height // 2, 0)
@@ -739,10 +747,13 @@ def neck_box_from_pose(
 
     cx = int((lx + rx) * 0.5)
     shoulder_y = int((ly + ry) * 0.5)
-    neck_center_y = int(ny + 0.6 * (shoulder_y - ny))
 
-    neck_width = int(np.clip(shoulder_dist * 1.05, 80, 240))
-    neck_height = int(np.clip(shoulder_dist * 0.9, 60, 200))
+    # Lower the neck center toward the shoulders (was 0.6).
+    neck_center_y = int(ny + 0.75 * (shoulder_y - ny))
+
+    # Increase width/height multipliers and relaxed clamps to capture larger scarf areas.
+    neck_width = int(np.clip(shoulder_dist * 1.25, 100, 380))
+    neck_height = int(np.clip(shoulder_dist * 1.10, 80, 300))
 
     nx1 = max(cx - neck_width // 2, 0)
     ny1 = max(neck_center_y - neck_height // 2, 0)
@@ -967,6 +978,19 @@ def run_monitor(
     display: bool = True,
     stop_event: Optional[threading.Event] = None,
 ) -> None:
+    # Lazily import YOLO to avoid raising ModuleNotFoundError during
+    # module import (e.g., in unit tests or environments lacking the
+    # optional `ultralytics` package). If unavailable, raise a clear
+    # runtime error so the caller can handle it and surface diagnostics.
+    global YOLO
+    try:
+        if YOLO is None:
+            from ultralytics import YOLO as _YOLO  # type: ignore
+            YOLO = _YOLO
+    except Exception as exc:
+        print("[ERROR] Failed to import 'ultralytics'. Please install it:", exc)
+        raise RuntimeError("Missing dependency: ultralytics") from exc
+
     if settings.model_path.exists():
         model_source = str(settings.model_path)
         print(f"[INFO] Loading YOLO model from '{model_source}'")
@@ -1031,10 +1055,11 @@ def run_monitor(
     try:
         try:
             if has_picamera2():
-                print("[DEBUG] Picamera2 appears available; attempting to initialize...")
-                picam2 = init_picamera2()
+                print("[DEBUG] Picamera2 appears available; attempting to initialize (1280x720)...")
+                # Request a higher preview resolution for better stream quality
+                picam2 = init_picamera2(preview_size=(1280, 720))
                 if picam2 is not None:
-                    print("[INFO] Using Picamera2 backend")
+                    print("[INFO] Using Picamera2 backend (1280x720)")
         except Exception:
             picam2 = None
 
@@ -1396,13 +1421,49 @@ def run_monitor(
 def _update_latest_frame(frame: np.ndarray) -> None:
     global _LATEST_FRAME
     with _FRAME_LOCK:
-        _LATEST_FRAME = frame.copy()
+        # Ensure stored latest frame is BGR uint8 and contiguous so encoders
+        # and downstream consumers get consistent colors.
+        f = frame.copy()
+        try:
+            if f.ndim == 3 and f.shape[2] == 4:
+                try:
+                    f = cv2.cvtColor(f, cv2.COLOR_RGBA2BGR)
+                except Exception:
+                    f = cv2.cvtColor(f, cv2.COLOR_BGRA2BGR)
+        except Exception:
+            pass
+        try:
+            if f.dtype != np.uint8:
+                f = f.astype('uint8')
+        except Exception:
+            pass
+        _LATEST_FRAME = np.ascontiguousarray(f)
 
 
 def _update_latest_raw_frame(frame: np.ndarray) -> None:
     global _LATEST_RAW_FRAME
     with _FRAME_LOCK:
-        _LATEST_RAW_FRAME = frame.copy()
+        # Store a normalized copy of the raw frame so the web "raw" stream
+        # doesn't suffer color channel mismatches (e.g., RGBA vs BGR).
+        f = frame.copy()
+        try:
+            if f.ndim == 3 and f.shape[2] == 4:
+                # Prefer RGBA->BGR, fall back to BGRA->BGR
+                try:
+                    f = cv2.cvtColor(f, cv2.COLOR_RGBA2BGR)
+                except Exception:
+                    try:
+                        f = cv2.cvtColor(f, cv2.COLOR_BGRA2BGR)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        try:
+            if f.dtype != np.uint8:
+                f = f.astype('uint8')
+        except Exception:
+            pass
+        _LATEST_RAW_FRAME = np.ascontiguousarray(f)
 
 
 def _set_latest_stats(
@@ -1456,8 +1517,14 @@ def _get_sound_enabled() -> bool:
         return _SOUND_ENABLED
 
 
-def _generate_mjpeg_frames(*, raw: bool = False) -> Iterable[bytes]:
-    jpeg_params = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
+def _generate_mjpeg_frames(*, raw: bool = False, quality: int = 90) -> Iterable[bytes]:
+    # Increase JPEG quality for clearer web stream (higher = better quality, more bandwidth)
+    try:
+        q = int(quality)
+    except Exception:
+        q = 90
+    q = max(10, min(100, q))
+    jpeg_params = [int(cv2.IMWRITE_JPEG_QUALITY), q]
     while True:
         with _FRAME_LOCK:
             if raw:
@@ -1631,8 +1698,15 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
     def video_feed() -> Response:
         raw_param = (request.args.get("raw") or "").strip().lower()
         raw = raw_param in {"1", "true", "yes", "on", "raw"}
+        # Optional quality parameter (10-100). Higher quality = larger bandwidth.
+        quality_param = request.args.get("quality")
+        try:
+            quality = int(quality_param) if quality_param is not None else 90
+        except Exception:
+            quality = 90
+        quality = max(10, min(100, quality))
         return Response(
-            _generate_mjpeg_frames(raw=raw),
+            _generate_mjpeg_frames(raw=raw, quality=quality),
             mimetype="multipart/x-mixed-replace; boundary=frame",
         )
 

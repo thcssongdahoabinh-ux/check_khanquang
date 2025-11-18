@@ -290,8 +290,10 @@
         .capture-preview img {
             display: block;
             width: 100%;
-            max-height: 260px;
+            /* Increase preview height to improve perceived quality */
+            max-height: 420px;
             object-fit: cover;
+            image-rendering: auto;
         }
         .capture-preview-overlay {
             position: absolute;
@@ -633,7 +635,9 @@
             previewActive = true;
             stopPreviewReconnectTimer();
             setPreviewState('connecting', 'admin.preview.connecting');
-            capturePreviewFeed.src = `video_feed?raw=1&cache=${Date.now()}`;
+            // Request higher JPEG quality for better clarity in the admin preview.
+            const quality = 95;
+            capturePreviewFeed.src = `video_feed?raw=1&quality=${quality}&cache=${Date.now()}`;
         }
 
         function schedulePreviewReconnect() {
@@ -643,7 +647,8 @@
                     return;
                 }
                 setPreviewState('connecting', 'admin.preview.reconnecting');
-                capturePreviewFeed.src = `video_feed?raw=1&cache=${Date.now()}`;
+                const quality = 95;
+                capturePreviewFeed.src = `video_feed?raw=1&quality=${quality}&cache=${Date.now()}`;
             }, 2000);
         }
 
