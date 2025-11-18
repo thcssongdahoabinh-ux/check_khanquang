@@ -1,0 +1,25 @@
+[Unit]
+Description=Red Scarf Monitoring Application
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/check_khanquang
+Environment="PATH=/home/pi/check_khanquang/venv/bin"
+ExecStart=/home/pi/check_khanquang/venv/bin/python /home/pi/check_khanquang/app.py --mode web
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Optional: Set environment variables
+# Environment="PYTHONUNBUFFERED=1"
+
+# Optional: Resource limits (adjust as needed)
+# LimitCPU=600
+# LimitMEMORY=2G
+
+[Install]
+WantedBy=multi-user.target
+

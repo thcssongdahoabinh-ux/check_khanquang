@@ -25,6 +25,16 @@ if not defined PYTHON (
 )
 
 :run
+echo Checking and installing dependencies...
+"%PYTHON%" -m pip install --quiet --upgrade pip
+"%PYTHON%" -m pip install --quiet -r requirements.txt
+if errorlevel 1 (
+    echo.
+    echo Failed to install dependencies. Please check your internet connection and try again.
+    pause
+    exit /b 1
+)
+
 echo Opening webcam preview in the browser...
 start "webcam-preview" http://localhost:%PORT%/
 

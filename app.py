@@ -31,6 +31,8 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
+from camera_backend import init_videocapture
+
 import yaml
 
 from flask import Flask, Response, abort, jsonify, redirect, request, send_from_directory, session, url_for
@@ -917,7 +919,41 @@ def save_snapshot(settings: Settings, frame: np.ndarray, track_id: int) -> Path:
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = settings.snapshot_dir / f"violation_{timestamp}_id{track_id}.jpg"
     cv2.imwrite(str(filename), frame)
+    cleanup_old_violation_images(settings.snapshot_dir, max_images=1000)
     return filename
+
+
+def cleanup_old_violation_images(snapshot_dir: Path, max_images: int = 1000) -> None:
+    """Keep only the last max_images violation images, delete older ones.
+    
+    Args:
+        snapshot_dir: Directory containing violation images
+        max_images: Maximum number of images to keep (default: 1000)
+    """
+    if not snapshot_dir.exists():
+        return
+    
+    # Get all violation image files
+    image_files = list(snapshot_dir.glob("violation_*.jpg"))
+    
+    if len(image_files) <= max_images:
+        return
+    
+    # Sort by modification time (newest first)
+    image_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    
+    # Delete older images beyond the limit
+    images_to_delete = image_files[max_images:]
+    deleted_count = 0
+    for img_file in images_to_delete:
+        try:
+            img_file.unlink()
+            deleted_count += 1
+        except OSError as e:
+            print(f"[WARNING] Failed to delete {img_file}: {e}")
+    
+    if deleted_count > 0:
+        print(f"[INFO] Cleaned up {deleted_count} old violation images, keeping {max_images} newest")
 
 
 # ---------------------------------------------------------------------------
@@ -943,6 +979,10 @@ def run_monitor(
 
     model = YOLO(model_source)
     print("[INFO] YOLO model ready.")
+    
+    # Clean up old violation images on startup
+    cleanup_old_violation_images(settings.snapshot_dir, max_images=1000)
+    
     tracker = SimpleTracker(settings.tracker_distance, settings.tracker_expiry)
     cooldown = CooldownTracker(settings.cooldown_seconds)
     alerts = AlertManager(settings)
@@ -975,9 +1015,16 @@ def run_monitor(
     _set_capture_active(settings.save_violation_images)
     _set_sound_enabled(settings.enable_sound_alert)
 
-    cap = cv2.VideoCapture(settings.camera_index)
-    if not cap.isOpened():
-        raise RuntimeError("Unable to open camera")
+    # Always use OpenCV VideoCapture backend only
+    print(f"[DEBUG] Attempting to open camera with index {settings.camera_index}...")
+    cap = init_videocapture(index=settings.camera_index, try_alternate=False)
+    if cap is None:
+        import os
+        cam_devices = [d for d in os.listdir('/dev') if d.startswith('video')]
+        print(f"[ERROR] Unable to open camera (VideoCapture) at index {settings.camera_index}.")
+        print(f"[DEBUG] /dev/video* devices found: {cam_devices}")
+        raise RuntimeError(f"Unable to open camera (VideoCapture) at index {settings.camera_index}. Devices: {cam_devices}")
+    print(f"[INFO] Using OpenCV VideoCapture backend (index {settings.camera_index})")
 
     print("Running...")
     if display:
@@ -1007,12 +1054,28 @@ def run_monitor(
         if stop_event and stop_event.is_set():
             break
 
-        success, frame = cap.read()
-        if not success:
-            print("[WARN] Camera read failed. Reconnecting...")
-            cap.release()
+        # Capture frame from OpenCV VideoCapture only
+        frame = None
+        try:
+            success, frame = cap.read()
+            if not success or frame is None:
+                print(f"[ERROR] cap.read() failed (success={success}, frame={type(frame)})")
+                frame = None
+        except Exception as e:
+            print(f"[WARN] Camera capture exception: {e}")
+            frame = None
+
+        if frame is None:
+            print("[WARN] Camera read failed. Reconnecting VideoCapture...")
+            try:
+                cap.release()
+            except Exception:
+                pass
             time.sleep(1)
-            cap = cv2.VideoCapture(settings.camera_index)
+            cap = init_videocapture(index=settings.camera_index, try_alternate=False)
+            if cap is None:
+                print("[ERROR] Reopening VideoCapture failed; exiting")
+                break
             continue
 
         raw_frame = frame.copy()
@@ -1241,7 +1304,27 @@ def run_monitor(
         else:
             time.sleep(0.001)
 
-    cap.release()
+    # Cleanup camera backends
+    try:
+        if cap is not None:
+            cap.release()
+    except Exception:
+        pass
+    try:
+        if picam2 is not None:
+            picam2.stop()
+    except Exception:
+        pass
+    try:
+        if rpicam_cam is not None:
+            # adapter exposes stop/release
+            if hasattr(rpicam_cam, 'stop'):
+                try:
+                    rpicam_cam.stop()
+                except Exception:
+                    pass
+    except Exception:
+        pass
     if display:
         cv2.destroyAllWindows()
 
@@ -1336,18 +1419,26 @@ def _generate_mjpeg_frames(*, raw: bool = False) -> Iterable[bytes]:
 
 
 def run_web_monitor(settings: Settings, host: str, port: int) -> None:
+
     stop_event = threading.Event()
+    from flask import g
+    import traceback
+    camera_error_holder = {'error': None}
+    def monitor_wrapper():
+        try:
+            run_monitor(settings, frame_callback=_update_latest_frame, display=False, stop_event=stop_event)
+        except Exception as e:
+            camera_error_holder['error'] = f"Camera error: {e}\n" + traceback.format_exc()
+            print(f"[ERROR] {camera_error_holder['error']}")
 
     monitor_thread = threading.Thread(
-        target=run_monitor,
-        args=(settings,),
-        kwargs={"frame_callback": _update_latest_frame, "display": False, "stop_event": stop_event},
+        target=monitor_wrapper,
         daemon=True,
     )
     monitor_thread.start()
 
-    # Wait a moment for monitor to initialize attendance store
-    time.sleep(1.0)
+    # Wait briefly, but do not block Flask startup
+    time.sleep(0.5)
 
     # Initialize email sender and scheduler if enabled
     global _EMAIL_SENDER, _EMAIL_SCHEDULER, _EMAIL_LOG_STORE
@@ -1387,18 +1478,36 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
         _EMAIL_SCHEDULER = None
         _EMAIL_LOG_STORE = None
 
+
     app = Flask(__name__, static_folder=str(Path(__file__).parent), static_url_path="")
     app.secret_key = settings.admin_password or "changeme123"
     app.config["SESSION_COOKIE_NAME"] = "admin_session"
     app.permanent_session_lifetime = dt.timedelta(hours=8)
 
+    # Make camera error available in all requests
+    @app.before_request
+    def inject_camera_error():
+        from flask import g
+        g.camera_error = camera_error_holder['error']
+
     @app.route("/")
     def root() -> Response:
+        from flask import g
+        if g.get('camera_error'):
+            return f"<h1>Camera Error</h1><pre>{g.camera_error}</pre>", 500
         return redirect("/webcam.html")
 
     @app.route("/webcam.html")
     def webcam_page() -> Response:
-        return send_from_directory(app.static_folder, "webcam.html")
+        from flask import g
+        if g.get('camera_error'):
+            return f"<h1>Camera Error</h1><pre>{g.camera_error}</pre>", 500
+        # Try to serve webcam.html, fallback to inline HTML if missing
+        import os
+        webcam_path = os.path.join(app.static_folder, "webcam.html")
+        if os.path.exists(webcam_path):
+            return send_from_directory(app.static_folder, "webcam.html")
+        return "<h1>Webcam Page</h1><p>No webcam.html found. If you see this, the server is running but the webcam page is missing.</p>", 200
 
     @app.route("/captures.html")
     def captures_page() -> Response:

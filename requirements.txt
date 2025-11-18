@@ -9,3 +9,13 @@ pyyaml>=6.0.1
 flask>=3.0.0
 
 
+
+# Notes:
+# - Picamera2 is usually provided via Raspberry Pi OS packages (apt). Example on Pi:
+#     sudo apt update && sudo apt install -y python3-picamera2 libcamera-apps
+# - If you prefer a pip-only setup on other platforms, consider adding `picamera2`
+#   or installing system packages as appropriate.
+# - `opencv-contrib-python` is listed above; if you run headless on the Pi,
+#   `opencv-python-headless` may be a smaller alternative.
+
+
