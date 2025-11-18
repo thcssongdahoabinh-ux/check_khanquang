@@ -582,6 +582,50 @@ class AttendanceStore:
         return self._samples_dir
 
 
+class SimpleImageRecognizer:
+    """
+    Lightweight fallback recognizer when OpenCV 'face' module is not present.
+
+    It stores grayscale, resized training images and predicts by computing
+    the mean absolute difference between the provided face image and each
+    stored sample. The API mirrors the minimal interface expected by
+    `StudentRecognizer` (train and predict) so it can be used as a drop-in
+    replacement for LBPH in environments without opencv-contrib.
+    """
+
+    def __init__(self) -> None:
+        self._images: List[np.ndarray] = []
+        self._labels: List[int] = []
+        self._lock = threading.Lock()
+
+    def train(self, images: List[np.ndarray], labels: np.ndarray) -> None:
+        with self._lock:
+            # store as float32 for numeric comparisons
+            self._images = [img.astype(np.float32) for img in images]
+            self._labels = [int(l) for l in labels.tolist()]
+
+    def predict(self, image: np.ndarray) -> Tuple[int, float]:
+        # Return (label, distance)
+        with self._lock:
+            if not self._images:
+                raise RuntimeError("No training images available")
+            img = image.astype(np.float32)
+            best_idx = 0
+            best_dist = float('inf')
+            for i, ref in enumerate(self._images):
+                if ref.shape != img.shape:
+                    # Resize reference to match query (shouldn't usually happen)
+                    ref_resized = cv2.resize(ref, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_LINEAR)
+                else:
+                    ref_resized = ref
+                # mean absolute error per pixel
+                dist = float(np.mean(np.abs(img - ref_resized)))
+                if dist < best_dist:
+                    best_dist = dist
+                    best_idx = i
+            return int(self._labels[best_idx]), float(best_dist)
+
+
 class StudentRecognizer:
     """
     LBPH-based face recognizer built from stored student samples.
@@ -605,9 +649,14 @@ class StudentRecognizer:
 
     @staticmethod
     def _create_recognizer() -> Optional[Any]:
-        if not hasattr(cv2, "face") or not hasattr(cv2.face, "LBPHFaceRecognizer_create"):
-            return None
-        return cv2.face.LBPHFaceRecognizer_create()
+        # Prefer LBPH from opencv-contrib if available; otherwise use
+        # a lightweight fallback that compares raw face images.
+        if hasattr(cv2, "face") and hasattr(cv2.face, "LBPHFaceRecognizer_create"):
+            try:
+                return cv2.face.LBPHFaceRecognizer_create()
+            except Exception:
+                pass
+        return SimpleImageRecognizer()
 
     @property
     def available(self) -> bool:
@@ -634,9 +683,24 @@ class StudentRecognizer:
             images.append(processed)
             labels.append(int(student_id))
 
-        if len(images) < self._min_samples:
+        # If there are no images we cannot train. However, in many real
+        # deployments it's common to have only 1-2 samples per student.
+        # To make the system more robust (restore attendance checking when
+        # only a few samples exist), fall back to training with whatever
+        # samples are available as long as there is at least one image.
+        if len(images) == 0:
             self._is_trained = False
             return
+
+        if len(images) < self._min_samples:
+            # Warn but proceed to train with fewer samples than configured.
+            try:
+                print(
+                    f"[WARN] Only {len(images)} training samples available (< configured min {self._min_samples})."
+                    " Proceeding to train recognizer with available samples."
+                )
+            except Exception:
+                pass
 
         with self._lock:
             assert self._recognizer is not None
