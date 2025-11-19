@@ -28,6 +28,8 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 import cv2
 import numpy as np
 from ultralytics import YOLO
+import subprocess
+import shutil
 
 import yaml
 
@@ -334,12 +336,46 @@ class AlertManager:
         self._voice_lock = threading.Lock()
 
     def sound(self) -> None:
-        if not self._settings.enable_sound_alert or playsound is None:
+        if not self._settings.enable_sound_alert:
             return
         alarm = self._settings.alarm_file
         if alarm is None or not alarm.exists():
             return
-        threading.Thread(target=playsound, args=(str(alarm),), daemon=True).start()
+
+        def _play_audio_file(path: Path) -> None:
+            if playsound is not None:
+                try:
+                    playsound(str(path))
+                    return
+                except Exception:
+                    pass
+
+            players = [
+                ("ffplay", ["-nodisp", "-autoexit", "-loglevel", "quiet", str(path)]),
+                ("mpg123", ["-q", str(path)]),
+                ("mpv", ["--no-terminal", "--really-quiet", str(path)]),
+                ("paplay", [str(path)]),
+                ("aplay", [str(path)]),
+            ]
+
+            for cmd, args in players:
+                if shutil.which(cmd):
+                    try:
+                        subprocess.Popen([cmd] + args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        return
+                    except Exception:
+                        continue
+
+            try:
+                if shutil.which("xdg-open"):
+                    subprocess.Popen(["xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return
+            except Exception:
+                pass
+
+            print(f"[WARN] Unable to play alarm sound: {path}")
+
+        threading.Thread(target=_play_audio_file, args=(alarm,), daemon=True).start()
 
     def voice(self, text: str) -> None:
         if not self._settings.enable_voice_alert or TTS_ENGINE is None:
@@ -618,7 +654,15 @@ def red_ratio(crop: np.ndarray) -> Tuple[float, Optional[Tuple[int, int, int, in
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
 
-    total_pixels = mask.size
+    # Compute ratio over only the valid (non-zero) pixels so that any
+    # region zeroed out by masking (e.g., upper band) does not unfairly
+    # reduce the measured red ratio.
+    try:
+        valid_mask = np.any(crop != 0, axis=2)
+        total_pixels = int(np.count_nonzero(valid_mask))
+    except Exception:
+        total_pixels = mask.size
+
     if total_pixels == 0:
         return 0.0, None
 

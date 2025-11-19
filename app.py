@@ -29,6 +29,8 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import cv2
 import numpy as np
+import subprocess
+import shutil
 # Importing heavy/optional ML libraries at module import time can make
 # unit tests and tooling fragile when the dependency is not installed.
 # The YOLO class will be imported lazily inside `run_monitor` so the
@@ -454,12 +456,56 @@ class AlertManager:
         self._voice_lock = threading.Lock()
 
     def sound(self) -> None:
-        if not _get_sound_enabled() or playsound is None:
+        if not _get_sound_enabled():
             return
         alarm = self._settings.alarm_file
         if alarm is None or not alarm.exists():
             return
-        threading.Thread(target=playsound, args=(str(alarm),), daemon=True).start()
+
+        # Play audio in a background thread. Prefer the `playsound` module
+        # if available; otherwise fall back to common system players found
+        # on Linux (ffplay/mpg123/aplay/paplay/mpv). This improves reliability
+        # on headless systems or environments where `playsound` fails.
+
+        def _play_audio_file(path: Path) -> None:
+            # Try playsound first if present
+            if playsound is not None:
+                try:
+                    playsound(str(path))
+                    return
+                except Exception:
+                    # Fall through to system players
+                    pass
+
+            # Try common command-line players
+            players = [
+                ("ffplay", ["-nodisp", "-autoexit", "-loglevel", "quiet", str(path)]),
+                ("mpg123", ["-q", str(path)]),
+                ("mpv", ["--no-terminal", "--really-quiet", str(path)]),
+                ("paplay", [str(path)]),
+                ("aplay", [str(path)]),
+            ]
+
+            for cmd, args in players:
+                if shutil.which(cmd):
+                    try:
+                        subprocess.Popen([cmd] + args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        return
+                    except Exception:
+                        continue
+
+            # Last resort: attempt to use `xdg-open` to hand off to default app (may be blocking on some systems)
+            try:
+                if shutil.which("xdg-open"):
+                    subprocess.Popen(["xdg-open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return
+            except Exception:
+                pass
+
+            # If nothing worked, print a warning so the operator can diagnose
+            print(f"[WARN] Unable to play alarm sound: {path}")
+
+        threading.Thread(target=_play_audio_file, args=(alarm,), daemon=True).start()
 
     def voice(self, text: str) -> None:
         if not self._settings.enable_voice_alert or TTS_ENGINE is None:
@@ -906,7 +952,16 @@ def red_ratio(crop: np.ndarray) -> Tuple[float, int, Optional[Tuple[int, int, in
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
 
-    total_pixels = mask.size
+    # Use only the valid (non-zero) pixels in the crop as the denominator.
+    # This prevents masked-out regions (set to zero by `mask_neck_upper_band`)
+    # from shrinking the computed ratio.
+    try:
+        valid_mask = np.any(crop != 0, axis=2)
+        total_pixels = int(np.count_nonzero(valid_mask))
+    except Exception:
+        # Fallback to full mask size if something unexpected happens
+        total_pixels = mask.size
+
     if total_pixels == 0:
         return 0.0, 0, None
 
@@ -2314,6 +2369,30 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
             abort(404)
         relative = target.relative_to(sample_dir)
         return send_from_directory(str(sample_dir), relative.as_posix())
+
+    @app.route("/api/diagnostic_frame")
+    def api_diagnostic_frame() -> Response:
+        """Return a single JPEG of the latest camera frame for diagnostics.
+
+        This helps inspect what the server actually sees when a capture is attempted.
+        """
+        with _FRAME_LOCK:
+            frame = None if _LATEST_RAW_FRAME is None else _LATEST_RAW_FRAME.copy()
+            if frame is None and _LATEST_FRAME is not None:
+                frame = _LATEST_FRAME.copy()
+
+        if frame is None:
+            abort(503, description="Camera frame unavailable")
+
+        try:
+            success, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        except Exception:
+            abort(500, description="Failed to encode frame")
+
+        if not success:
+            abort(500, description="Failed to encode frame")
+
+        return Response(buffer.tobytes(), mimetype='image/jpeg')
 
     try:
         app.run(host=host, port=port, debug=False, threaded=True, use_reloader=False)
