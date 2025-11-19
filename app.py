@@ -1629,11 +1629,20 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
     # Initialize email sender and scheduler if enabled
     global _EMAIL_SENDER, _EMAIL_SCHEDULER, _EMAIL_LOG_STORE
     if settings.email_enabled and settings.email_sender and settings.email_password and settings.email_receiver:
+        # The monitor thread initializes _ATTENDANCE_STORE; wait briefly to avoid a race
+        # where the scheduler is attempted before attendance store is ready.
+        wait_total = 0.0
+        wait_step = 0.1
+        wait_limit = 10.0
+        while _ATTENDANCE_STORE is None and wait_total < wait_limit:
+            time.sleep(wait_step)
+            wait_total += wait_step
+
         if _ATTENDANCE_STORE is not None:
             try:
                 # Initialize email log store
                 _EMAIL_LOG_STORE = EmailLogStore(settings.db_path)
-                
+
                 _EMAIL_SENDER = EmailSender(
                     sender_email=settings.email_sender,
                     sender_password=settings.email_password,
@@ -1655,7 +1664,7 @@ def run_web_monitor(settings: Settings, host: str, port: int) -> None:
                 _EMAIL_SCHEDULER = None
                 _EMAIL_LOG_STORE = None
         else:
-            print("[WARN] Email scheduler not started: attendance store not available")
+            print("[WARN] Email scheduler not started: attendance store not available after waiting")
             _EMAIL_SENDER = None
             _EMAIL_SCHEDULER = None
             _EMAIL_LOG_STORE = None

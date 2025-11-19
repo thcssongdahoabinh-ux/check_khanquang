@@ -389,7 +389,9 @@
                 }
 
                 const response = await fetch(`api/email/logs?${params.toString()}`, {
-                    cache: 'no-store'
+                    cache: 'no-store',
+                    // Ensure same-origin credentials (session cookie) are sent
+                    credentials: 'same-origin',
                 });
 
                 if (!response.ok) {
@@ -437,10 +439,18 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
-                    }
+                    },
+                    // Ensure same-origin credentials (session cookie) are sent
+                    credentials: 'same-origin',
                 });
 
-                const data = await response.json();
+                // Some error responses may not be JSON; guard against that.
+                let data = {};
+                try {
+                    data = await response.json();
+                } catch (err) {
+                    data = { success: false, message: response.statusText || 'Unexpected response' };
+                }
 
                 if (response.ok && data.success) {
                     reportStatus.textContent = 'Today\'s report sent successfully!';
